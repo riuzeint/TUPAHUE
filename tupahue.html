@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tupahue</title>
+
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+
+<body>
+
+  <!-- 1. ENTRADA (QR) -->
+  <section class="screen on" id="s-intro">
+    <p class="small mono">conexión establecida desde: tótem_01 / acceso norte</p>
+    <div style="height:16vh"></div>
+    <h1 class="center glitch mono" data-t="TUPAHUE">TUPAHUE</h1>
+    <p class="saludo">HOLAAAA</p>
+    <p class="center">Escaneaste el código.<br>Eso significa que ya estás aquí.</p>
+    <p class="center mono small">algunos caminos no aparecen en los mapas<br>porque los mapas no quieren que vayas</p>
+    <div style="height:8vh"></div>
+    <p class="center"><button class="btn" onclick="go('s-login')">entrar &gt;&gt;</button></p>
+    <p class="center small" style="margin-top:12vh">eres el visitante nº <span class="counter">000413</span><br>página
+      optimizada para Netscape 4.0 · 800x600</p>
+  </section>
+
+  <!-- 2. REGISTRO -->
+  <section class="screen" id="s-login">
+    <h2 class="mono">:: registro ::</h2>
+    <p class="small">Necesitamos saber quién eres. Para poder encontrarte después.</p>
+    <form id="f-login" class="box">
+      <label>nombre o apodo</label><input type="text" id="u-name" required placeholder="ej: cami">
+      <label>correo</label><input type="email" id="u-mail" required placeholder="tu@correo.cl">
+      <label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" required> <span>Confirmo que soy
+          mayor de 18 años.</span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start"><input type="checkbox" required> <span
+          class="small">Acepto la política de privacidad y entiendo que recorro el cerro bajo mi propia responsabilidad,
+          por senderos habilitados y en horario del parque.</span></label>
+      <p class="center"><button class="btn" type="submit">continuar</button></p>
+    </form>
+    <p class="small center">(prototipo: los datos no se guardan en ningún lado)</p>
+  </section>
+
+  <!-- 3. PORTADA + RUTAS -->
+  <section class="screen" id="s-home">
+    <p class="small mono">sesión: <span id="hello"></span> · <span class="blink">●</span> en línea</p>
+    <h1 class="glitch mono" data-t="TUPAHUE">TUPAHUE</h1>
+    <p><i>Rutas para caminar por los lugares que la ciudad prefiere olvidar.</i></p>
+    <p class="small">↓ baja para ver las rutas disponibles ↓</p>
+    <hr>
+    <h3 class="mono">[ rutas ]</h3>
+
+    <div class="ruta">
+      <span class="tag">DISPONIBLE</span>
+      <b>La Ladera que No Mira</b><br>
+      <span class="small">Cerro San Cristóbal · Santiago, Chile</span>
+      <table>
+        <tr>
+          <td>tiempo estimado</td>
+          <td>~75 min</td>
+        </tr>
+        <tr>
+          <td>checkpoints</td>
+          <td>5</td>
+        </tr>
+        <tr>
+          <td>completada por</td>
+          <td><span class="counter">0013</span> personas</td>
+        </tr>
+        <tr>
+          <td>dificultad</td>
+          <td><span class="diff">■■■■■■□□□□</span> 6/10</td>
+        </tr>
+      </table>
+      <p style="font-size:15px">Hay una cara del cerro que no se ve desde la ciudad. Sin antenas, sin kioscos, sin
+        bancas. Los que suben por ahí dicen que a mitad de camino alguien empieza a hablarles. Nadie sabe quién es.
+        Todos dicen que conoce su nombre.</p>
+      <p class="center"><button class="btn" onclick="startRoute()">comenzar ruta</button></p>
+    </div>
+
+    <div class="ruta locked"><span class="tag">PRÓXIMAMENTE</span><b>El Pasillo 7</b><br><span class="small">Santiago
+        Centro, Chile</span>
+      <p class="small">██████ ████ ███████ ██████.</p>
+    </div>
+    <div class="ruta locked"><span class="tag">PRÓXIMAMENTE</span><b>Los Ascensores Quietos</b><br><span
+        class="small">Valparaíso, Chile</span>
+      <p class="small">███ ██████████ █████ ███.</p>
+    </div>
+    <div class="ruta locked"><span class="tag">???</span><b>████████</b><br><span class="small">[fuera de Chile]</span>
+      <p class="small">la señal todavía no llega hasta allá.</p>
+    </div>
+    <hr>
+    <p class="small center">rutas nuevas cuando la señal lo permite · <span class="lnk"
+        onclick="go('s-intro')">salir</span></p>
+  </section>
+
+  <!-- 4. TRAVESIA -->
+  <section class="screen" id="trav">
+    <div class="top"><span id="cpcount">checkpoint 0/5</span><span><span class="lnk" id="sndbtn" onclick="toggleSound()"
+          style="color:#777">sonido: off</span> · GPS: <span id="gps">buscando…</span></span></div>
+    <svg id="compass" viewBox="0 0 200 200" aria-label="brújula">
+      <circle cx="100" cy="100" r="92" fill="none" stroke="#222" stroke-width="1.5" />
+      <circle cx="100" cy="100" r="80" fill="none" stroke="#bbb" stroke-dasharray="2 5" />
+      <g font-family="Courier New" font-size="14" text-anchor="middle" fill="#222">
+        <text x="100" y="24">N</text><text x="182" y="105">E</text><text x="100" y="190">S</text><text x="18"
+          y="105">O</text>
+      </g>
+      <g id="needle" style="transform-origin:100px 100px">
+        <polygon points="100,26 108,100 100,92 92,100" fill="#a40000" />
+        <polygon points="100,174 108,100 100,108 92,100" fill="#222" />
+        <circle cx="100" cy="100" r="4" fill="#000" />
+      </g>
+    </svg>
+    <div id="cpinfo">sin mapa · solo la voz</div>
+    <div id="simbar"><button class="btn" id="simbtn" onclick="simArrive()" style="font-size:12px;padding:5px 8px">▶
+        simular llegada</button></div>
+
+    <div id="actions"></div>
+    <div id="dialog" onclick="advance()">
+      <div class="who">??? dice:</div>
+      <div id="dtext"></div>
+      <div class="next blink">▼ toca para seguir</div>
+    </div>
+  </section>
+
+  <!-- 5. FINAL -->
+  <section class="screen" id="s-final">
+    <p class="small mono">conexión desde: tótem_02 / el hito</p>
+    <h2 class="mono">llegaste.</h2>
+    <p>Acerca tu celular al sticker del tótem.</p>
+    <p class="center"><button class="btn" id="nfcbtn" onclick="nfcTap()">((·)) simular lectura NFC</button></p>
+    <div id="final-upload" style="display:none">
+      <div class="box">
+        <p><b>Última petición:</b> sácale una foto a la vista desde el tótem. Quiero ver lo que tú ves.</p>
+        <input type="file" accept="image/*" capture="environment" id="viewpic">
+        <img id="viewprev" class="thumb" style="display:none" alt="">
+        <label>tu reseña</label>
+        <div class="stars" id="stars"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></div>
+        <textarea id="revtext" rows="3" placeholder="¿qué te pareció la ruta?"></textarea>
+        <p class="center"><button class="btn" onclick="publish()">publicar y recibir postal</button></p>
+      </div>
+    </div>
+    <div id="final-done" style="display:none">
+      <h3 class="mono">[ tu postal ]</h3>
+      <img id="postal" alt="postal de la ruta">
+      <p class="small center">mantén presionada la imagen para guardarla y subirla a tus historias.<br>(versión final:
+        se enviará también a tu correo)</p>
+      <hr>
+      <h3 class="mono">[ muro de quienes volvieron ]</h3>
+      <div id="wall"></div>
+      <p class="center"><button class="btn" onclick="location.reload()">volver al inicio</button></p>
+    </div>
+  </section>
+
+  <div id="flash"></div>
+
+
+</body>
+
+</html>
