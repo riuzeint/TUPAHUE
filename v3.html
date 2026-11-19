@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arreboles</title>
+<!-- Librería para conectar los celulares entre sí (salas en tiempo real) -->
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+  /* ============ 1. ESTILOS (lo visual) ============
+     Cambia aquí los colores de toda la página. */
+  :root{
+    --fondo:#fff7f0;      /* fondo general */
+    --texto:#2b1d2e;      /* color de letra */
+    --naranjo:#f28c38;    /* arrebol 1 */
+    --rosado:#e85d75;     /* arrebol 2 */
+    --morado:#6b3fa0;     /* arrebol 3 */
+    --gris:#8a7f8c;
+    --ok:#2e9e6a;
+  }
+  *{box-sizing:border-box}
+  html{color-scheme:light;overflow-x:hidden}
+  body{margin:0;background:var(--fondo);color:var(--texto);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow-x:hidden}
+  .wrap{max-width:480px;margin:0 auto;padding:18px 16px 90px}
+  .hero{background:linear-gradient(160deg,var(--naranjo),var(--rosado) 55%,var(--morado));color:#fff;border-radius:0 0 28px 28px;padding:42px 20px 30px;text-align:center}
+  .hero h1{margin:0;font-size:42px;letter-spacing:1px}
+  .hero p{margin:6px 0 0;opacity:.9}
+  h2{font-size:22px;margin:18px 0 8px}
+  h3{margin:14px 0 6px}
+  .card{background:#fff;border-radius:16px;padding:16px;margin:12px 0;box-shadow:0 2px 10px rgba(80,30,60,.08)}
+  .btn{display:block;width:100%;border:0;border-radius:12px;padding:14px;font:600 16px system-ui,sans-serif;background:var(--rosado);color:#fff;cursor:pointer;margin:8px 0}
+  .btn.sec{background:#fff;color:var(--morado);border:2px solid var(--morado)}
+  .btn.big{padding:26px;font-size:22px}
+  .btn[disabled]{opacity:.45;cursor:default}
+  input{width:100%;padding:12px;border:2px solid #e5d8e8;border-radius:10px;font:16px system-ui,sans-serif;color:#111;-webkit-text-fill-color:#111;background:#fff}
+  label{display:block;margin:10px 0 4px;font-weight:600;font-size:14px}
+  .small{font-size:13px;color:var(--gris)}
+  .row{display:flex;gap:8px;align-items:center}
+  .code{font:700 40px ui-monospace,monospace;letter-spacing:8px;text-align:center;color:var(--morado)}
+  .pill{display:inline-block;background:#f3e8f7;color:var(--morado);border-radius:20px;padding:4px 10px;margin:3px;font-size:14px}
+  .pill.me{background:var(--morado);color:#fff}
+  .ruta.lock{opacity:.5}
+  .ruta table{width:100%;font-size:14px}.ruta td:last-child{text-align:right}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  .cardm{aspect-ratio:3/4;border-radius:10px;border:0;background:var(--morado);color:#fff;font:600 12px system-ui;display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;cursor:pointer}
+  .cardm.up{background:#fff;color:var(--texto);border:2px solid var(--rosado)}
+  .cardm.ok{background:#e3f6ec;color:var(--ok);border:2px solid var(--ok)}
+  .letters span{display:inline-block;width:42px;height:50px;line-height:50px;text-align:center;margin:4px;border-radius:8px;background:var(--naranjo);color:#fff;font:700 26px system-ui}
+  #toast{position:fixed;left:50%;top:12px;transform:translate(-50%,-150%);width:min(92vw,440px);background:var(--texto);color:#fff;border-radius:14px;padding:14px 16px;box-shadow:0 8px 30px rgba(0,0,0,.25);transition:transform .35s;z-index:50}
+  #toast.on{transform:translate(-50%,0)}
+  #toast b{color:var(--naranjo)}
+  .status{position:fixed;bottom:8px;left:50%;transform:translateX(-50%);font-size:12px;background:#fff;border-radius:20px;padding:4px 12px;box-shadow:0 1px 6px rgba(0,0,0,.1);white-space:nowrap}
+  .prog{height:8px;background:#eadcf0;border-radius:8px;overflow:hidden}.prog div{height:100%;background:var(--rosado)}
+  .stats td{padding:4px 0}.stats td:last-child{text-align:right;font-weight:600}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<div class="status" id="status">sin conexión</div>
+
+<script>
+/* =========================================================
+   2. CONTENIDO EDITABLE — rutas, misiones y textos
+   Puedes cambiar los textos entre comillas sin romper nada.
+   ========================================================= */
+const RUTAS = [
+  { id:'facultad', nombre:'Pañol', lugar:'Demo universitaria', activa:true,
+    tiempo:'~25 min', dificultad:3, completada:7,
+    historia:'Demo de testeo en las inmediaciones de el Pañol, ruta demostrativa',
+    intro:'Bienvenidos a la ruta de testeo. Esta ruta es solo para probar el juego, no tiene un recorrido real. Pueden caminar por los pasillos y salas del Pañol, pero no se preocupen si no encuentran nada: la idea es que prueben las misiones. :] ',
+    cierre:'Felicitaciones, completaron la ruta de testeo. Esperamos que hayan disfrutado el juego y que se animen a probar las rutas reales en el futuro. ¡Gracias por participar!',
+    checkpoints:[
+      { lugar:'Entrada', pista:'Empiecen donde todos entran pero nadie se queda.', mision:'orden' },
+      { lugar:'Espacio común', pista:'Busquen el lugar donde el desorden hace al diseño y y los estudiantes descansan.', mision:'palabra', palabra:'COMUNIDAD' },
+      { lugar:'Auditorio', pista:'Vayan donde muchos escuchan a uno solo.', mision:'memorice' },  
+      { lugar:'Tercer piso', pista:'Suban hasta el último piso de salas. Sepárense: de lid a nuestro taller', mision:'nfc' },
+    ]},
+  { id:'cascada', nombre:'La Cascada', lugar:'Cerro San Cristóbal · Santiago', activa:false,
+    tiempo:'~90 min', dificultad:6, completada:0,
+    historia:'Ruta desde el Mirador Mapulemu que contempla interesantes paisajes en los cuales se distrufa mucho más con un compañero.' },
+];
+// Flores del memorice (nombres provisorios: validar con fuentes del Parquemet)
+const FLORES = ['Alstroemeria','Chagual','Quillay','Oreja de zorro'];
+const MISIONES = {
+  orden:   { titulo:'En orden', instr:'Cada uno tiene un número. Presionen su botón en orden: 1, 2, 3… Si alguien se adelanta, se reinicia.' },
+  palabra: { titulo:'Palabra repartida', instr:'Cada uno tiene algunas letras. Júntenlas y formen la palabra.' },
+  memorice:{ titulo:'Memorice de flores', instr:'Encuentren los pares de flores nativas. Se juega por turnos: el que tiene el turno da vuelta 2 cartas.' },
+  nfc:     { titulo:'Dos puntos a la vez', instr:'Hay 2 stickers NFC lejos uno del otro. Las personas A y B deben acercar su celular casi al mismo tiempo (menos de 10 segundos).' },
+};
+const SEGUNDOS_NFC = 10;
+const BROKERS = ['wss://broker.hivemq.com:8884/mqtt','wss://broker.emqx.io:8084/mqtt'];
+
+/* =========================================================
+   3. MEMORIA LOCAL — el perfil se pide solo la primera vez
+   ========================================================= */
+const store = {
+  get(k){ try{ return JSON.parse(localStorage.getItem('arr_'+k)) }catch(e){ return null } },
+  set(k,v){ try{ localStorage.setItem('arr_'+k, JSON.stringify(v)) }catch(e){} },
+};
+let perfil = store.get('perfil');                 // {nombre, correo}
+const miId = store.get('id') || ('p' + Math.random().toString(36).slice(2,8));
+store.set('id', miId);
+const tagNFC = new URLSearchParams(location.search).get('tag'); // ?tag=A cuando se abre desde un sticker
+
+/* =========================================================
+   4. CONEXIÓN ENTRE CELULARES (salas)
+   Un celular es el "anfitrión": guarda el estado del juego
+   y se lo envía a todos. Los demás solo envían acciones.
+   ========================================================= */
+let net = null, sala = null, soyAnfitrion = false, simulado = false;
+let S = null;          // estado del juego (lo manda el anfitrión)
+let vista = 'inicio';  // pantalla local antes de entrar a una sala
+let ultimoEstado = '';
+
+function conectar(codigo, alConectar){
+  setStatus('conectando…');
+  let i = 0, listo = false;
+  const intentar = () => {
+    if (typeof mqtt === 'undefined' || i >= BROKERS.length) { setStatus('sin conexión'); return alConectar(false); }
+    const cli = mqtt.connect(BROKERS[i++], { clientId:'arr_'+miId+'_'+Math.random().toString(36).slice(2,5), connectTimeout:5000, reconnectPeriod:2000 });
+    const t = setTimeout(()=>{ if(!listo){ try{cli.end(true)}catch(e){}; intentar(); } }, 6000);
+    cli.on('connect', ()=>{
+      if (listo) return; listo = true; clearTimeout(t);
+      const topico = 'arreboles/v1/' + codigo;
+      cli.subscribe(topico);
+      net = { enviar:m => cli.publish(topico, JSON.stringify(m)) };
+      cli.on('message', (_, buf)=>{ try{ recibir(JSON.parse(buf.toString())) }catch(e){} });
+      setStatus('en línea · sala ' + codigo);
+      alConectar(true);
+    });
+    cli.on('error', ()=>{});
+  };
+  intentar();
+}
+function enviar(m){ if (simulado) return; net && net.enviar(m); }
+
+// Mensajes que llegan de otros celulares
+function recibir(m){
+  if (m.t === 'estado' && !soyAnfitrion) {
+    const nuevo = JSON.stringify(m.s); if (nuevo === ultimoEstado) return; // nada cambió: no redibujar
+    ultimoEstado = nuevo; const antes = S; S = m.s; avisarCambios(antes, S); render(); }
+  if (soyAnfitrion && m.t === 'unirse') { agregarJugador(m.id, m.nombre); }
+  if (soyAnfitrion && m.t === 'accion') { procesar(m.id, m.a); }
+}
+// Cada acción del jugador pasa por aquí
+function accion(a){ if (soyAnfitrion) procesar(miId, a); else enviar({ t:'accion', id:miId, a }); }
+// El anfitrión reparte el estado a todos
+function publicar(){ enviar({ t:'estado', s:S }); }
+setInterval(()=>{ if (soyAnfitrion && S) publicar(); }, 3000);
+setInterval(()=>{ if (!soyAnfitrion && sala && !(S && S.jugadores.some(j=>j.id===miId))) enviar({ t:'unirse', id:miId, nombre:perfil.nombre }); }, 2000);
+
+/* =========================================================
+   5. LÓGICA DEL JUEGO (solo la ejecuta el anfitrión)
+   ========================================================= */
+function nuevaSala(codigo){
+  return { codigo, fase:'espera', ruta:'facultad', cp:0, jugadores:[{ id:miId, nombre:perfil.nombre }],
+           mision:null, stats:{ inicio:null, fin:null, errores:0, ayudas:0 } };
+}
+function agregarJugador(id, nombre){
+  if (!S.jugadores.some(j=>j.id===id)) { S.jugadores.push({ id, nombre }); cambio(); }
+}
+const ruta = () => RUTAS.find(r=>r.id===S.ruta);
+const mezclar = arr => arr.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
+
+function prepararMision(cp){
+  const tipo = cp.mision, ids = S.jugadores.map(j=>j.id);
+  if (tipo === 'orden')   return { tipo, orden:mezclar(ids), paso:0 };
+  if (tipo === 'palabra') {
+    const letras = mezclar(cp.palabra.split('')), reparto = {};
+    ids.forEach(id=>reparto[id]=[]); letras.forEach((l,i)=>reparto[ids[i%ids.length]].push(l));
+    return { tipo, reparto, pista:0 };
+  }
+  if (tipo === 'memorice') return { tipo, cartas:mezclar([...FLORES,...FLORES]).map(f=>({ f, arriba:false, ok:false })), turno:0, abiertas:[] };
+  if (tipo === 'nfc') {   // con 3 o más, A y B no son el anfitrión (así el anfitrión no pierde la sala al abrir el link del sticker)
+    const [A,B] = ids.length >= 3 ? [ids[1], ids[2]] : [ids[0], ids[1]];
+    return { tipo, A, B, toques:{} }; }
+}
+
+function procesar(id, a){
+  const m = S.mision;
+  if (['presionar','adivinar','voltear','tocar'].includes(a.k) && !m) return;
+  switch (a.k) {
+    case 'ruta':     if (id===S.jugadores[0].id) S.ruta = a.ruta; break;
+    case 'comenzar': S.fase='intro'; S.stats.inicio=Date.now(); break;
+    case 'caminar':  S.fase='caminar'; break;
+    case 'llegamos': S.fase='mision'; S.mision = prepararMision(ruta().checkpoints[S.cp]); break;
+    case 'ayuda':    S.stats.ayudas++; if (m && m.tipo==='palabra') m.pista++; break;
+
+    case 'presionar': // misión "en orden"
+      if (m.orden[m.paso] === id) { m.paso++; if (m.paso >= m.orden.length) return completar(); }
+      else { m.paso = 0; S.stats.errores++; S.avisoN = Date.now(); S.aviso = '¡Alguien se adelantó! Vuelvan a empezar desde el 1.'; }
+      break;
+
+    case 'adivinar': // misión "palabra repartida"
+      if (a.w.trim().toUpperCase() === ruta().checkpoints[S.cp].palabra) return completar();
+      S.stats.errores++; S.avisoN = Date.now(); S.aviso = '"' + a.w.toUpperCase() + '" no es la palabra.';
+      break;
+
+    case 'voltear': { // misión "memorice"
+      const c = m.cartas[a.i];
+      if (S.jugadores[m.turno].id !== id || c.arriba || c.ok || m.abiertas.length >= 2) return;
+      c.arriba = true; m.abiertas.push(a.i);
+      if (m.abiertas.length === 2) {
+        const [x,y] = m.abiertas.map(i=>m.cartas[i]);
+        if (x.f === y.f) { x.ok = y.ok = true; m.abiertas = []; if (m.cartas.every(c=>c.ok)) return completar(); }
+        else { S.stats.errores++; setTimeout(()=>{ x.arriba = y.arriba = false; m.abiertas = []; m.turno = (m.turno+1) % S.jugadores.length; cambio(); }, 1300); }
+      }
+      break; }
+
+    case 'tocar': // misión "dos NFC a la vez"
+      m.toques[a.tag] = Date.now();
+      if (m.toques.A && m.toques.B) {
+        if (Math.abs(m.toques.A - m.toques.B) <= SEGUNDOS_NFC*1000) return completar();
+        S.stats.errores++; S.avisoN = Date.now(); S.aviso = 'Muy separados en el tiempo. Cuenten hasta 3 y acerquen el celular juntos.'; m.toques = {};
+      }
+      break;
+  }
+  cambio();
+}
+function completar(){
+  S.cp++; S.mision = null; S.aviso = null;
+  if (S.cp >= ruta().checkpoints.length) { S.fase='final'; S.stats.fin=Date.now(); }
+  else S.fase = 'caminar';
+  S.celebrar = Date.now();
+  cambio();
+}
+function cambio(){ const antes = S._prev; S._prev = null; publicar(); avisarCambios(antes, S); S._prev = JSON.parse(JSON.stringify(S)); render(); if (simulado) setTimeout(bots, 900); }
+
+/* =========================================================
+   6. JUGADORES SIMULADOS (para probar sin otros celulares)
+   ========================================================= */
+function bots(){
+  if (!S || S.fase !== 'mision') return;
+  const m = S.mision, esBot = id => id.startsWith('bot');
+  if (m.tipo==='orden' && esBot(m.orden[m.paso])) procesar(m.orden[m.paso], { k:'presionar' });
+  if (m.tipo==='memorice' && esBot(S.jugadores[m.turno].id) && m.abiertas.length < 2) {
+    const libres = m.cartas.map((c,i)=>i).filter(i=>!m.cartas[i].arriba && !m.cartas[i].ok);
+    procesar(S.jugadores[m.turno].id, { k:'voltear', i:libres[Math.floor(Math.random()*libres.length)] });
+  }
+  if (m.tipo==='nfc') ['A','B'].forEach(t=>{ const otro = t==='A'?'B':'A';
+    // un bot toca si su compañero ya tocó, o si ambos son bots (el A parte)
+    if (esBot(m[t]) && !m.toques[t] && (m.toques[otro] || (t==='A' && esBot(m.B)))) procesar(m[t], { k:'tocar', tag:t }); });
+}
+
+/* =========================================================
+   7. NOTIFICACIONES (aviso + vibración + sonido)
+   ========================================================= */
+function toast(html){ const t=document.getElementById('toast'); t.innerHTML=html; t.classList.add('on'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('on'),5000); }
+function bip(){ try{ const a=new (window.AudioContext||window.webkitAudioContext)(), o=a.createOscillator(), g=a.createGain(); o.frequency.value=880; g.gain.value=.08; o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime+.18); }catch(e){} }
+function notificar(html){ toast(html); bip(); try{ navigator.vibrate && navigator.vibrate([120,60,120]); }catch(e){} }
+function avisarCambios(a, b){
+  if (!b) return;
+  if (b.fase==='mision' && (!a || a.fase!=='mision')) { const M = MISIONES[b.mision.tipo]; notificar('<b>Nueva misión: ' + M.titulo + '</b><br>' + M.instr); }
+  if (b.aviso && (!a || a.avisoN !== b.avisoN)) toast(b.aviso);
+  if (b.celebrar && (!a || a.celebrar !== b.celebrar)) notificar('<b>¡Misión cumplida!</b>');
+}
+
+/* =========================================================
+   8. PANTALLAS (lo que se dibuja según el estado)
+   ========================================================= */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function setStatus(t){ $('status').textContent = t; }
+
+function render(){
+  const app = $('app');
+  if (!perfil) { app.innerHTML = pRegistro(); return; }
+  if (!S) { app.innerHTML = vista==='unirse' ? pUnirse() : pInicio(); return; }
+  const f = { espera:pEspera, intro:pIntro, caminar:pCaminar, mision:pMision, final:pFinal }[S.fase];
+  app.innerHTML = f();
+}
+const hero = sub => `<div class="hero"><h1>Arreboles</h1><p>${sub}</p></div>`;
+
+function pRegistro(){ return hero('Juego urbano colectivo') + `<div class="wrap"><div class="card">
+  <h2>Primera vez aquí</h2><p class="small">Solo te lo pedimos una vez, para guardar tu progreso.</p>
+  <label>Nombre o apodo</label><input id="r-n" placeholder="ej: cami">
+  <label>Correo</label><input id="r-c" type="email" placeholder="tu@correo.cl">
+  <label class="row" style="font-weight:400"><input type="checkbox" id="r-e" style="width:auto"> Soy mayor de 18 años</label>
+  <button class="btn" onclick="registrar()">Entrar</button></div></div>`; }
+
+function pInicio(){ return hero('Hola, ' + esc(perfil.nombre)) + `<div class="wrap">
+  <h2>Juega en grupo</h2>
+  <button class="btn" onclick="crearSala(false)">Crear sala</button>
+  <button class="btn sec" onclick="vista='unirse';render()">Unirme con un código</button>
+  <button class="btn sec" onclick="crearSala(true)">Probar con jugadores simulados</button>
+  <h2>Rutas</h2>${RUTAS.map(cardRuta).join('')}
+  <p class="small" style="text-align:center"><a href="#" onclick="salirPerfil();return false">no soy ${esc(perfil.nombre)}</a></p></div>`; }
+
+function cardRuta(r, elegir){ return `<div class="card ruta ${r.activa?'':'lock'}">
+  <b>${r.nombre}</b> ${r.activa?'':'<span class="pill">próximamente</span>'}<br><span class="small">${r.lugar}</span>
+  <p style="margin:8px 0">${r.historia}</p>
+  <table><tr><td>Tiempo</td><td>${r.tiempo}</td></tr><tr><td>Misiones</td><td>${r.checkpoints?r.checkpoints.length:4}</td></tr>
+  <tr><td>Grupos que la completaron</td><td>${r.completada}</td></tr><tr><td>Dificultad</td><td>${r.dificultad}/10</td></tr></table>
+  ${elegir && r.activa ? `<button class="btn ${S.ruta===r.id?'':'sec'}" onclick="accion({k:'ruta',ruta:'${r.id}'})">${S.ruta===r.id?'✓ elegida':'elegir'}</button>`:''}</div>`; }
+
+function pUnirse(){ return hero('Unirse a una sala') + `<div class="wrap"><div class="card">
+  <label>Código de la sala</label><input id="u-c" maxlength="4" style="text-transform:uppercase;font-size:28px;text-align:center;letter-spacing:8px">
+  <button class="btn" onclick="unirse()">Unirme</button><button class="btn sec" onclick="vista='inicio';render()">Volver</button></div></div>`; }
+
+function pEspera(){ const host = S.jugadores[0].id===miId;
+  return hero('Sala de espera') + `<div class="wrap"><div class="card"><p class="small" style="text-align:center;margin:0">Código para tus compañeros</p><div class="code">${S.codigo}</div></div>
+  <div class="card"><b>Jugadores (${S.jugadores.length})</b><br>${S.jugadores.map(j=>`<span class="pill ${j.id===miId?'me':''}">${esc(j.nombre)}</span>`).join('')}</div>
+  ${host ? RUTAS.map(r=>cardRuta(r,true)).join('') + `<button class="btn" ${S.jugadores.length<2?'disabled':''} onclick="accion({k:'comenzar'})">Comenzar ruta</button><p class="small">Se necesitan al menos 2 jugadores.</p>`
+         : `<p class="small" style="text-align:center">Esperando que ${esc(S.jugadores[0].nombre)} comience…</p>`}</div>`; }
+
+function pIntro(){ const r = ruta(); return hero(r.nombre) + `<div class="wrap"><div class="card"><p>${r.intro}</p></div>
+  <button class="btn" onclick="accion({k:'caminar'})">Vamos</button></div>`; }
+
+function barra(){ const n = ruta().checkpoints.length; return `<div class="prog"><div style="width:${S.cp/n*100}%"></div></div><p class="small">Misión ${Math.min(S.cp+1,n)} de ${n}</p>`; }
+
+function pCaminar(){ const cp = ruta().checkpoints[S.cp]; return `<div class="wrap">${barra()}
+  <div class="card"><p class="small" style="margin:0">Pista</p><h2 style="margin-top:4px">${cp.pista}</h2></div>
+  <p class="small">Caminen juntos. Cuando crean haber llegado, avisen:</p>
+  <button class="btn big" onclick="accion({k:'llegamos'})">¡Llegamos!</button></div>`; }
+
+function pMision(){ const m = S.mision, M = MISIONES[m.tipo], cp = ruta().checkpoints[S.cp]; let h = '';
+  if (m.tipo==='orden') { const mi = m.orden.indexOf(miId)+1;
+    h = `<p>Tu número es</p><div class="code">${mi}</div><p class="small">Van en el ${m.paso+1} de ${m.orden.length}.</p>
+         <button class="btn big" onclick="accion({k:'presionar'})">Presionar</button>`; }
+  if (m.tipo==='palabra') { const mias = m.reparto[miId]||[], otras = simulado ? Object.entries(m.reparto).filter(([id])=>id!==miId).map(([,l])=>l).flat() : [];
+    h = `<p>Tus letras:</p><div class="letters">${mias.map(l=>`<span>${l}</span>`).join('')}</div>
+         ${simulado?`<p class="small">Tus compañeros (simulados) te dicen que tienen:</p><div class="letters">${otras.map(l=>`<span style="background:var(--morado)">${l}</span>`).join('')}</div>`:''}
+         ${m.pista?`<p class="small">Pista: empieza con <b>${cp.palabra.slice(0,m.pista)}</b></p>`:''}
+         <label>La palabra es…</label><input id="m-w" autocomplete="off"><button class="btn" onclick="accion({k:'adivinar',w:$('m-w').value})">Responder</button>
+         <button class="btn sec" onclick="accion({k:'ayuda'})">Pedir una pista</button>`; }
+  if (m.tipo==='memorice') { const t = S.jugadores[m.turno];
+    h = `<p>Turno de: <b>${t.id===miId?'ti':esc(t.nombre)}</b></p><div class="grid">${m.cartas.map((c,i)=>`<button class="cardm ${c.ok?'ok':c.arriba?'up':''}" onclick="accion({k:'voltear',i:${i}})">${c.arriba||c.ok?c.f:'✿'}</button>`).join('')}</div>`; }
+  if (m.tipo==='nfc') { const rol = m.A===miId?'A':m.B===miId?'B':null;
+    h = rol ? `<p>Tú eres la persona <b>${rol}</b>. Ve al sticker ${rol} y acerca tu celular cuando se pongan de acuerdo.</p>
+               <button class="btn big" onclick="accion({k:'tocar',tag:'${rol}'})">((·)) simular sticker ${rol}</button>
+               <p class="small">${m.toques[rol==='A'?'B':'A']?'¡Tu compañero ya tocó el suyo! Rápido.':''}</p>`
+            : `<p>Ayuda a las personas A y B a coordinarse: cuenta "3, 2, 1" en voz alta.</p>`; }
+  return `<div class="wrap">${barra()}<div class="card"><p class="small" style="margin:0">${cp.lugar}</p><h2 style="margin-top:4px">${M.titulo}</h2><p class="small">${M.instr}</p>${h}</div></div>`; }
+
+function pFinal(){ const r = ruta(), st = S.stats, min = Math.round((st.fin-st.inicio)/60000), d = new Date(st.fin);
+  return hero('Ruta completada') + `<div class="wrap"><div class="card"><p>${r.cierre}</p></div>
+  <div class="card" style="text-align:center"><p style="margin:0">🎨</p><b>Tu postal dibujada a mano</b><p class="small">Retírala en el punto final mostrando esta pantalla.</p></div>
+  <div class="card"><b>Estadísticas del grupo</b><table class="stats" style="width:100%">
+    <tr><td>Ruta</td><td>${r.nombre}</td></tr><tr><td>Tiempo</td><td>${min} min</td></tr>
+    <tr><td>Personas</td><td>${S.jugadores.length}</td></tr><tr><td>Errores</td><td>${st.errores}</td></tr>
+    <tr><td>Ayudas pedidas</td><td>${st.ayudas}</td></tr>
+    <tr><td>Día</td><td>${d.toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'})}</td></tr>
+    <tr><td>Hora</td><td>${d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'})}</td></tr></table></div>
+  <button class="btn sec" onclick="salirSala()">Volver al inicio</button></div>`; }
+
+/* =========================================================
+   9. BOTONES (lo que pasa al tocar)
+   ========================================================= */
+function registrar(){
+  const n=$('r-n').value.trim(), c=$('r-c').value.trim();
+  if (!n || !c.includes('@') || !$('r-e').checked) return toast('Completa tu nombre, un correo válido y confirma que eres mayor de edad.');
+  perfil = { nombre:n, correo:c }; store.set('perfil', perfil); render();
+}
+function salirPerfil(){ perfil=null; store.set('perfil', null); render(); }
+function codigoAzar(){ const L='ABCDEFGHJKLMNPQRSTUVWXYZ'; return Array.from({length:4},()=>L[Math.floor(Math.random()*L.length)]).join(''); }
+
+function crearSala(sim){
+  const cod = codigoAzar(); soyAnfitrion = true; sala = cod;
+  const iniciar = () => { S = nuevaSala(cod); S._prev = JSON.parse(JSON.stringify(S)); store.set('sala',{cod, host:true}); render(); };
+  if (sim) { simulado = true; setStatus('modo simulado'); iniciar();
+    agregarJugador('bot1','Vale (simulada)'); agregarJugador('bot2','Tomás (simulado)'); return; }
+  conectar(cod, ok => { if (ok) iniciar(); else { toast('No se pudo conectar. Puedes usar el modo con jugadores simulados.'); soyAnfitrion=false; sala=null; } });
+}
+function unirse(cod){
+  cod = (cod || $('u-c').value).trim().toUpperCase(); if (cod.length!==4) return toast('El código tiene 4 letras.');
+  soyAnfitrion = false; sala = cod;
+  conectar(cod, ok => { if (!ok) return toast('No se pudo conectar a la sala.'); store.set('sala',{cod, host:false}); enviar({ t:'unirse', id:miId, nombre:perfil.nombre }); setStatus('esperando al anfitrión…'); });
+}
+function salirSala(){ store.set('sala', null); location.href = location.pathname; }
+
+// Si la página se abrió desde un sticker NFC (?tag=A), se reconecta a la sala y "toca"
+if (tagNFC && perfil) {
+  const g = store.get('sala');
+  if (g && !g.host) { unirse(g.cod); const espera = setInterval(()=>{ if (S && S.mision && S.mision.tipo==='nfc') { accion({k:'tocar', tag:tagNFC}); clearInterval(espera); } }, 1000); }
+}
+render();
+</script>
+</body>
+</html>
