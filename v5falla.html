@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tupahue · Juego urbano colectivo</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@500;600;700;800&display=swap" rel="stylesheet">
+<!-- Conexión entre celulares (salas en tiempo real) -->
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+  tailwind.config = { theme: { extend: {
+    colors: { poppy:'#D6533F', terracotta:'#87332B', whitesand:'#E5C1A1', ashwagandha:'#5C4E16', grass:'#84752F', wine:'#863B56', elderberry:'#5B1B3A' },
+    fontFamily: { brand:['Fredoka','sans-serif'], sans:['Nunito','sans-serif'] } } } };
+</script>
+<style>
+  html{color-scheme:light;font-size:17.5px;overflow-x:hidden}
+  body{font-family:'Nunito',sans-serif;background:#f3e8dd;background-image:radial-gradient(#E5C1A1 1.5px,transparent 1.5px);background-size:24px 24px;overflow-x:hidden}
+  h1,h2,h3,.font-brand{font-family:'Fredoka',sans-serif}
+  input,textarea{color:#E5C1A1;-webkit-text-fill-color:#E5C1A1}
+  input::placeholder{color:rgba(229,193,161,.45);-webkit-text-fill-color:rgba(229,193,161,.45)}
+  .entra{animation:entra .35s cubic-bezier(.16,1,.3,1)}
+  @keyframes entra{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  .flota{animation:flota 3.5s ease-in-out infinite}@keyframes flota{50%{transform:translateY(-6px)}}
+  .late::before{content:'';position:absolute;inset:-6px;border-radius:9999px;background:#D6533F;animation:late 2s infinite;z-index:0}
+  @keyframes late{0%{transform:scale(.9);opacity:.85}70%,100%{transform:scale(1.5);opacity:0}}
+  .no-scroll::-webkit-scrollbar{display:none}
+  canvas.lienzo{touch-action:none;background:#fff;border-radius:18px}
+  .holdable{user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:none}
+</style>
+</head>
+<body class="text-ashwagandha">
+<div id="app" class="relative max-w-[440px] mx-auto min-h-[100dvh] bg-grass overflow-hidden shadow-2xl"></div>
+<div id="toast" class="fixed left-1/2 top-3 -translate-x-1/2 -translate-y-[180%] w-[92vw] max-w-[420px] z-50 transition-transform duration-300"></div>
+
+<script>
+/* ==========================================================================
+   1. CONTENIDO EDITABLE (rutas, roles, misiones, textos)
+   Cambia los textos entre comillas. No borres comas ni llaves.
+   ========================================================================== */
+const ROLES = {
+  profeta:     { nombre:'Profeta',      habilidad:'Voz del relato',   desc:'Recibe la historia, las pistas y las instrucciones. Se las cuenta al grupo.' },
+  navegador:   { nombre:'Navegador/a',  habilidad:'Brújula',          desc:'Tiene la brújula. Su celular reacciona cuando apunta en la dirección correcta.' },
+  fotografo:   { nombre:'Fotógrafo/a',  habilidad:'Cámara',           desc:'Toma las fotos que piden las misiones. Una IA reconoce lo que fotografía.' },
+  agitador:    { nombre:'Agitador/a',   habilidad:'Movimiento',       desc:'Agita el celular y toca la pantalla para mantener vivo el tiempo del grupo.' },
+  microfono:   { nombre:'Micrófono',    habilidad:'Oído',             desc:'Escucha y mide los sonidos del lugar. Graba los audios del recorrido.' },
+  equilibrista:{ nombre:'Equilibrista', habilidad:'Giroscopio',       desc:'Mantiene el celular perfectamente nivelado mientras el grupo actúa.' },
+};
+// Orden en que se reparten los roles. Con menos de 6 personas, alguien tendrá 2 roles.
+const ORDEN_ROLES = ['profeta','navegador','fotografo','agitador','microfono','equilibrista'];
+
+const RUTAS = [
+  { id:'taller', nombre:'Taller', etiqueta:'Demo', lugar:'Facultad · demo universitaria', activa:true,
+    tiempo:'~30 min', dificultad:4, completada:7,
+    bajada:'Mira tu facultad como si fuera un cerro: senderos, miradores y secretos que solo se ven en grupo.',
+    intro:'Antes de llamarse San Cristóbal, el cerro se llamaba Tupahue. Hoy vamos a recorrer nuestra facultad como si fuera ese cerro: tiene senderos, miradores y lugares secretos. Ninguno de nosotros puede llegar solo a la cima. Primero, el NFC de la entrada.',
+    cierre:'Llegamos al lugar donde nació este juego. Cada uno tenía una parte: la voz, la brújula, la cámara, el movimiento, el oído y el equilibrio. Ninguna servía sola. Esto que hicimos juntos se llama comunidad.',
+    checkpoints:[
+      { lugar:'Entrada',        nfc:1, rumbo:0,   mision:'equilibrio', pista:'Empiecen donde todos entran: los torniquetes.' },
+      { lugar:'Espacio libre',  nfc:2, rumbo:0,   mision:'colores',    pista:'Frente a la entrada se abre el lugar donde la facultad respira.' },
+      { lugar:'Escalera del fondo', nfc:3, rumbo:0, mision:'fotos',    pista:'Al fondo del espacio libre, a mano derecha, hay una forma de subir.' },
+      { lugar:'Auditorio (3er piso)', nfc:4, rumbo:180, mision:'sonidos',  pista:'Suban al tercer piso: la puerta alta del lugar donde muchos escuchan a uno solo.' },
+      { lugar:'LID',            nfc:5, rumbo:90,  mision:'brujula',    pista:'Frente al auditorio, a mano derecha: el laboratorio donde lo digital se toca.',
+        rumboSecreto:90, palabra:'TUPAHUE', pistaProfeta:'En la dirección que apunte el Navegador hay una palabra escondida. Él la verá en su pantalla: pídansela.' },
+      { lugar:'Taller de Interacción Digital', nfc:6, rumbo:90, final:true, pista:'Sigan el pasillo hasta el fondo: el lugar donde nació este juego.' },
+    ]},
+  { id:'cascada', nombre:'La Cascada', etiqueta:'Cerro', lugar:'Cerro San Cristóbal · Santiago', activa:false,
+    tiempo:'~90 min', dificultad:6, completada:0,
+    bajada:'Acceso Pedro de Valdivia → Mirador Mapulemu → Jardín Mapulemu → La Cascada.' },
+];
+
+const MISIONES = {
+  equilibrio:{ titulo:'Equilibrio en orden', resumen:'Cada uno presiona su botón en orden (1, 2, 3…) mientras el Equilibrista mantiene su celular nivelado. Si se adelantan o el celular se inclina, se reinicia.' },
+  colores:   { titulo:'Cazadores de color', resumen:'Yo les digo un color. El Fotógrafo busca algo de ese color y lo fotografía. La foto solo cuenta si el Equilibrista mantiene su celular nivelado: es el trípode del grupo. Son 3 colores.' },
+  fotos:     { titulo:'Fotografía contra el tiempo', resumen:'El Profeta dicta qué fotografiar. El Fotógrafo lo encuentra y le saca una foto. El tiempo se agota rápido si el Agitador deja de moverse.' },
+  sonidos:   { titulo:'Colección de sonidos', resumen:'Yo les pido un sonido. Todos lo hacen juntos mientras el Micrófono graba 3 segundos. Yo escucho la grabación y decido si vale. Son 3 sonidos.' },
+  brujula:   { titulo:'Brújula ciega', resumen:'El Navegador debe apuntar en la dirección secreta durante 3 segundos para ver la palabra clave. El Profeta debe escribirla.' },
+};
+// Objetos que la IA puede reconocer en la misión de fotos (nombre en inglés de la IA → texto)
+const OBJETOS = [
+  { ia:'chair', es:'una silla' }, { ia:'bottle', es:'una botella' }, { ia:'backpack', es:'una mochila' },
+  { ia:'book', es:'un libro' }, { ia:'laptop', es:'un notebook' }, { ia:'cup', es:'una taza o vaso' },
+  { ia:'potted plant', es:'una planta' }, { ia:'clock', es:'un reloj' }, { ia:'cell phone', es:'un celular' },
+];
+const TIEMPO_FOTOS = 90;        // segundos de la misión de fotos
+// Colores de la misión "Cazadores de color" (h = rangos de tono, 0-360)
+const COLORES = [
+  { id:'rojo', es:'ROJO', hex:'#D6533F', h:[[0,15],[340,361]] }, { id:'naranjo', es:'NARANJO', hex:'#F28C38', h:[[15,40]] },
+  { id:'amarillo', es:'AMARILLO', hex:'#E8C547', h:[[40,68]] },  { id:'verde', es:'VERDE', hex:'#5E9E4A', h:[[68,165]] },
+  { id:'azul', es:'AZUL', hex:'#3F6FD6', h:[[185,255]] },       { id:'morado', es:'MORADO', hex:'#863B56', h:[[255,340]] },
+];
+const PORC_COLOR = 12;      // % mínimo de la foto que debe tener el color
+// Sonidos de la misión "Colección de sonidos"
+const SONIDOS = ['un aplauso de todos al mismo tiempo','un silbido','una risa grupal','todos diciendo "¡Tupahue!"','golpes en una mesa o pared, al mismo ritmo','un "shhh" muy largo de todos'];
+const UMBRAL_SONIDO = 35;   // volumen mínimo (0-100) para que la grabación cuente
+const BROKERS = ['wss://broker.hivemq.com:8884/mqtt','wss://broker.emqx.io:8084/mqtt'];
+
+/* ==========================================================================
+   2. ILUSTRACIONES (avatares de roles y paisajes en SVG)
+   ========================================================================== */
+const AVATAR = {
+  profeta:`<svg viewBox="0 0 64 64" class="w-full h-full"><circle cx="32" cy="35" r="17" fill="#E5C1A1" stroke="#5B1B3A" stroke-width="2.5"/><path d="M15 31 C15 16,49 16,49 31 C45 23,19 23,15 31Z" fill="#5C4E16" stroke="#5B1B3A" stroke-width="2"/><circle cx="26" cy="35" r="2" fill="#5B1B3A"/><circle cx="38" cy="35" r="2" fill="#5B1B3A"/><path d="M27 42 Q32 46 37 42" fill="none" stroke="#D6533F" stroke-width="2.5" stroke-linecap="round"/></svg>`,
+  navegador:`<svg viewBox="0 0 64 64" class="w-full h-full"><circle cx="32" cy="34" r="18" fill="#E5C1A1" stroke="#5B1B3A" stroke-width="2.5"/><path d="M14 27 C14 14,50 14,50 27Z" fill="#87332B" stroke="#5B1B3A" stroke-width="2.5"/><path d="M12 27 Q32 32 54 26" fill="none" stroke="#5B1B3A" stroke-width="3" stroke-linecap="round"/><circle cx="26" cy="34" r="2" fill="#5B1B3A"/><circle cx="38" cy="34" r="2" fill="#5B1B3A"/><path d="M28 41 Q32 44 36 41" fill="none" stroke="#5B1B3A" stroke-width="2" stroke-linecap="round"/></svg>`,
+  fotografo:`<svg viewBox="0 0 64 64" class="w-full h-full"><circle cx="32" cy="35" r="17" fill="#E5C1A1" stroke="#5B1B3A" stroke-width="2.5"/><path d="M14 33 C12 16,52 16,50 33 C48 24,16 24,14 33Z" fill="#5B1B3A"/><circle cx="18" cy="22" r="5" fill="#5B1B3A"/><circle cx="32" cy="17" r="6" fill="#5B1B3A"/><circle cx="46" cy="22" r="5" fill="#5B1B3A"/><circle cx="26" cy="35" r="4.5" fill="none" stroke="#863B56" stroke-width="2"/><circle cx="38" cy="35" r="4.5" fill="none" stroke="#863B56" stroke-width="2"/><line x1="30.5" y1="35" x2="33.5" y2="35" stroke="#863B56" stroke-width="2"/><path d="M28 43 Q32 46 36 43" fill="none" stroke="#5B1B3A" stroke-width="2" stroke-linecap="round"/></svg>`,
+  agitador:`<svg viewBox="0 0 64 64" class="w-full h-full"><circle cx="32" cy="35" r="17" fill="#E5C1A1" stroke="#5B1B3A" stroke-width="2.5"/><path d="M15 29 C16 15,48 15,49 29Z" fill="#863B56" stroke="#5B1B3A" stroke-width="2"/><rect x="15" y="26" width="34" height="4" rx="2" fill="#D6533F"/><circle cx="26" cy="36" r="2" fill="#5B1B3A"/><circle cx="38" cy="36" r="2" fill="#5B1B3A"/><path d="M26 42 Q32 47 38 42" fill="none" stroke="#5B1B3A" stroke-width="2.2" stroke-linecap="round"/></svg>`,
+  microfono:`<svg viewBox="0 0 64 64" class="w-full h-full"><path d="M14 48 L16 26 C18 14,46 14,48 26 L50 48Z" fill="#5B1B3A"/><circle cx="32" cy="35" r="16" fill="#E5C1A1" stroke="#5B1B3A" stroke-width="2.5"/><path d="M17 30 Q32 22 47 30" fill="#5B1B3A"/><circle cx="26" cy="35" r="2" fill="#5B1B3A"/><circle cx="38" cy="35" r="2" fill="#5B1B3A"/><path d="M28 42 Q32 45 36 42" fill="none" stroke="#87332B" stroke-width="2" stroke-linecap="round"/></svg>`,
+  equilibrista:`<svg viewBox="0 0 64 64" class="w-full h-full"><circle cx="32" cy="36" r="16" fill="#E5C1A1" stroke="#5B1B3A" stroke-width="2.5"/><path d="M17 31 C18 20,46 20,47 31 C42 26,22 26,17 31Z" fill="#87332B"/><circle cx="32" cy="14" r="5" fill="#D6533F" stroke="#5B1B3A" stroke-width="2"/><line x1="12" y1="20" x2="52" y2="20" stroke="#5B1B3A" stroke-width="2.5" stroke-linecap="round"/><circle cx="26" cy="36" r="2" fill="#5B1B3A"/><circle cx="38" cy="36" r="2" fill="#5B1B3A"/><path d="M27 43 L37 43" stroke="#5B1B3A" stroke-width="2.2" stroke-linecap="round"/></svg>`,
+};
+const MONTANAS = `<svg viewBox="0 0 375 330" preserveAspectRatio="none" class="w-full h-full block">
+  <path d="M0 175 L55 115 L110 155 L185 88 L255 148 L320 105 L375 150 L375 330 L0 330Z" fill="#863B56" opacity=".45"/>
+  <path d="M0 190 L85 130 L165 180 L240 112 L315 168 L375 135 L375 330 L0 330Z" fill="#5B1B3A" opacity=".55"/>
+  <path d="M185 88 L162 115 L178 112 L185 122 L195 110 L208 116Z" fill="#E5C1A1" opacity=".85"/>
+  <path d="M0 125 Q95 190 165 275 L0 295Z" fill="#84752F"/><path d="M375 170 Q275 215 195 280 L375 300Z" fill="#87332B" opacity=".85"/>
+  <path d="M0 250 Q185 215 375 260 L375 330 L0 330Z" fill="#84752F"/><path d="M0 280 Q190 255 375 290 L375 330 L0 330Z" fill="#5C4E16"/>
+  <g fill="#5C4E16"><circle cx="52" cy="265" r="14"/><circle cx="70" cy="272" r="11"/><circle cx="322" cy="274" r="15"/></g></svg>`;
+const PICO = `<svg viewBox="0 0 375 150" preserveAspectRatio="none" class="absolute inset-0 w-full h-full pointer-events-none">
+  <polygon points="25,145 95,55 165,145" fill="#863B56"/><polygon points="215,145 290,52 360,145" fill="#863B56"/>
+  <polygon points="85,145 188,8 290,145" fill="#5B1B3A"/><polygon points="188,8 153,55 172,50 188,64 205,48 222,55" fill="#E5C1A1"/></svg>`;
+const arbol = (x,y,s=1)=> IMG_OK.arbol ? `<image href="img/arbol.png" x="${x-20*s}" y="${y-26*s}" width="${40*s}" height="${52*s}"/>` : `<g transform="translate(${x},${y}) scale(${s})"><rect x="-3" y="14" width="6" height="10" rx="2" fill="#87332B"/><polygon points="0,-16 -14,6 14,6" fill="#5C4E16"/><polygon points="0,-6 -17,16 17,16" fill="#5C4E16"/></g>`;
+// posiciones (%) de los 6 puntos sobre el sendero del mapa
+const POS = [[30,88],[60,74],[34,58],[58,42],[40,26],[56,10]];
+// Dibujos a mano: si existe img/<nombre>.png se usa; si no, aparece el dibujo por defecto
+const IMG_OK = {};
+['logo','fondo-inicio','rol-profeta','rol-navegador','rol-fotografo','rol-agitador','rol-microfono','rol-equilibrista','arbol','sello-postal']
+  .forEach(n=>{ const i=new Image(); i.onload=()=>{ IMG_OK[n]=true; render(true); }; i.src='img/'+n+'.png'; });
+const png = (n,cls='') => `<img src="img/${n}.png" class="${cls}" alt="">`;
+const dif = n => Array.from({length:10},(_,i)=>`<span class="inline-block w-2 h-3 rounded-sm mr-0.5 align-middle ${i<n?'bg-poppy':'bg-current opacity-25'}"></span>`).join('')+` <span class="align-middle">${n}/10</span>`;
+
+/* ==========================================================================
+   3. MEMORIA LOCAL (perfil solo la primera vez)
+   ========================================================================== */
+const store = { get(k){ try{ return JSON.parse(localStorage.getItem('tup_'+k)) }catch(e){ return null } },
+                set(k,v){ try{ localStorage.setItem('tup_'+k, JSON.stringify(v)) }catch(e){} } };
+let perfil = store.get('perfil');
+const miId = store.get('id') || ('p'+Math.random().toString(36).slice(2,8)); store.set('id', miId);
+const TAB = Math.random().toString(36).slice(2);
+const nfcURL = parseInt(new URLSearchParams(location.search).get('nfc')) || null;   // ?nfc=3 al acercar un sticker
+
+/* ==========================================================================
+   4. CONEXIÓN ENTRE CELULARES (modelo anfitrión)
+   El anfitrión (quien crea la sala = Profeta) guarda el estado y lo reparte.
+   Los demás solo envían acciones.
+   ========================================================================== */
+let net=null, sala=null, soyAnfitrion=false, simulado=false, S=null, vista='bienvenida', ultimoJSON='';
+const MEDIA = [];   // fotos, dibujos y audios para la pieza audiovisual (en el anfitrión)
+
+function conectar(codigo, cb){
+  red('conectando…'); let i=0, listo=false;
+  const intentar=()=>{
+    if (typeof mqtt==='undefined' || i>=BROKERS.length){ red('sin conexión'); return cb(false); }
+    const cli = mqtt.connect(BROKERS[i++], { clientId:'tup_'+miId+'_'+Math.random().toString(36).slice(2,5), connectTimeout:5000, reconnectPeriod:2000 });
+    const t = setTimeout(()=>{ if(!listo){ try{cli.end(true)}catch(e){} intentar(); } }, 6500);
+    cli.on('connect', ()=>{ if(listo) return; listo=true; clearTimeout(t);
+      const topico='tupahue/v4/'+codigo; cli.subscribe(topico);
+      net={ enviar:m=>cli.publish(topico, JSON.stringify(m)) };
+      cli.on('message',(_,b)=>{ try{ recibir(JSON.parse(b.toString())) }catch(e){} });
+      red('en línea · sala '+codigo); cb(true); });
+    cli.on('error',()=>{});
+  };
+  intentar();
+}
+function enviar(m){ if(!simulado && net) net.enviar(m); }
+function recibir(m){ if (typeof pausada!=='undefined' && pausada) return;
+  if (m.t==='estado' && !soyAnfitrion){ const j=JSON.stringify(m.s); if(j===ultimoJSON) return; ultimoJSON=j; const a=S; S=m.s; avisos(a,S); render(); }
+  if (soyAnfitrion && m.t==='unirse') agregar(m.id, m.nombre);
+  if (soyAnfitrion && m.t==='accion') procesar(m.id, m.a);
+}
+function accion(a){ if (soyAnfitrion) procesar(miId, a); else enviar({ t:'accion', id:miId, a }); }
+let tPub=null; function publicar(){ clearTimeout(tPub); tPub=setTimeout(()=>enviar({ t:'estado', s:S }), 120); }
+setInterval(()=>{ if(soyAnfitrion && S) enviar({ t:'estado', s:S }); }, 3000);
+setInterval(()=>{ if(!soyAnfitrion && sala && perfil && !(S && S.jugadores.some(j=>j.id===miId))) enviar({ t:'unirse', id:miId, nombre:perfil.nombre }); }, 2000);
+
+/* ==========================================================================
+   5. LÓGICA DEL JUEGO (solo la ejecuta el anfitrión)
+   ========================================================================== */
+const ruta = ()=> RUTAS.find(r=>r.id===S.ruta);
+const cpAct = ()=> ruta().checkpoints[S.cp];
+const mezclar = a => a.map(v=>[Math.random(),v]).sort((x,y)=>x[0]-y[0]).map(x=>x[1]);
+const nombre = id => (S.jugadores.find(j=>j.id===id)||{}).nombre || '?';
+const quien = rol => S.roles && S.roles[rol];
+const misRoles = (id=miId) => S && S.roles ? ORDEN_ROLES.filter(r=>S.roles[r]===id) : [];
+const tengo = rol => misRoles().includes(rol);
+
+function nuevaSala(cod){ return { codigo:cod, fase:'lobby', ruta:'taller', cp:0, jugadores:[{id:miId,nombre:perfil.nombre}],
+  roles:null, nfcTurno:null, mision:null, ayuda:false, aviso:null, avisoN:0, celebrar:0,
+  stats:{ inicio:null, fin:null, errores:0, ayudas:0, misiones:[], clima:null } }; }
+function agregar(id,nom){ if(S.fase!=='lobby' || S.jugadores.length>=6 || S.jugadores.some(j=>j.id===id)) return; S.jugadores.push({id,nombre:nom}); cambio(); }
+function aviso(t){ S.aviso=t; S.avisoN=Date.now(); }
+
+function asignarRoles(){
+  const otros = mezclar(S.jugadores.slice(1).map(j=>j.id)), lista=[S.jugadores[0].id, ...otros];  // anfitrión = Profeta
+  S.roles={}; ORDEN_ROLES.forEach((r,i)=>S.roles[r]=lista[i%lista.length]);
+}
+function elegirNFC(){ // al azar; si hay 2+ personas, nunca el Profeta (en iPhone el NFC abre otra pestaña)
+  const ids=S.jugadores.map(j=>j.id), op = ids.length>1 ? ids.filter(i=>i!==quien('profeta')) : ids;
+  S.nfcTurno = op[Math.floor(Math.random()*op.length)];
+}
+function prepararMision(cp){
+  const ids=S.jugadores.map(j=>j.id), base={ tipo:cp.mision, errores:0, inicio:Date.now() };
+  if (cp.mision==='equilibrio') return { ...base, orden:mezclar(ids), paso:0, nivel:false };
+  if (cp.mision==='colores')    return { ...base, objetivos:mezclar(COLORES).slice(0,3), hechos:0, pendiente:null, nivel:false };
+  if (cp.mision==='fotos')      return { ...base, objetivos:mezclar(OBJETOS).slice(0,3), hechos:0, pendiente:null, tiempo:TIEMPO_FOTOS, ultimaEnergia:0, energia:0 };
+  if (cp.mision==='sonidos')    return { ...base, objetivos:mezclar(SONIDOS).slice(0,3), hechos:0, pendiente:null };
+  if (cp.mision==='brujula')    return { ...base, revelado:false };
+}
+// Reloj de la misión de fotos (el anfitrión lo descuenta cada segundo)
+setInterval(()=>{
+  if (!soyAnfitrion || !S || S.fase!=='mision' || S.mision.tipo!=='fotos') return;
+  const m=S.mision, activo = Date.now()-m.ultimaEnergia < 2500;
+  m.tiempo -= activo ? 1 : 3; m.energia = Math.max(0, m.energia-12);
+  if (m.tiempo<=0){ m.errores++; S.stats.errores++; aviso('¡Se acabó el tiempo! Empiecen de nuevo.'); m.tiempo=TIEMPO_FOTOS; m.hechos=0; m.pendiente=null; }
+  cambio();
+}, 1000);
+
+function procesar(id, a){
+  const m=S.mision, cp=S.fase!=='lobby'?cpAct():null;
+  const err = t => { if(m) m.errores++; S.stats.errores++; aviso(t); };
+  switch(a.k){
+    // --- sala ---
+    case 'ruta': if(id===S.jugadores[0].id && RUTAS.find(r=>r.id===a.ruta&&r.activa)) S.ruta=a.ruta; break;
+    case 'bot+': if(simulado && S.jugadores.length<6){ const n=['Vale','Tomás','Sofi','Benja','Isi']; const k=S.jugadores.length; S.jugadores.push({id:'bot'+k,nombre:n[k-1]+' (sim)'}); } break;
+    case 'bot-': if(simulado && S.jugadores.length>2) S.jugadores.pop(); break;
+    case 'comenzar': if(S.jugadores.length>=2){ asignarRoles(); S.fase='roles'; } break;
+    // --- roles e historia (solo el Profeta) ---
+    case 'rolesListos': if(id===quien('profeta')) S.fase='revelar'; break;
+    case 'iniciar': if(id===quien('profeta')){ S.fase='camino'; S.cp=0; S.stats.inicio=Date.now(); elegirNFC(); } break;
+    case 'ayuda': S.ayuda=true; S.stats.ayudas++; break;
+    // --- NFC ---
+    case 'nfc':
+      if (S.fase!=='camino') return;
+      if (a.n!==cp.nfc) { aviso('Ese NFC no es el de este punto. Busquen el '+cp.nfc+'.'); break; }
+      if (id!==S.nfcTurno) { aviso('¡No! Le toca a '+nombre(S.nfcTurno)+' acercar su celular.'); break; }
+      S.ayuda=false;
+      if (cp.final) S.fase='cierre'; else { S.fase='mision'; S.mision=prepararMision(cp); }
+      break;
+    // --- misión 1: equilibrio en orden ---
+    case 'nivel': if(!m||!('nivel' in m)||id!==quien('equilibrista')) return;
+      if (m.tipo==='equilibrio' && m.nivel && !a.ok && m.paso>0){ m.paso=0; err('¡Se perdió el equilibrio! Vuelvan al 1.'); }
+      m.nivel=a.ok; break;
+    case 'presionar': if(!m||m.tipo!=='equilibrio') return;
+      if (!m.nivel) { m.paso=0; err('El celular del Equilibrista no está nivelado.'); break; }
+      if (m.orden[m.paso]===id){ m.paso++; if(m.paso>=m.orden.length) return completar(); }
+      else { m.paso=0; err('¡Alguien se adelantó! Vuelvan al 1.'); }
+      break;
+    // --- misión 2: cazadores de color ---
+    case 'fotoColor': if(!m||m.tipo!=='colores'||id!==quien('fotografo')) return;
+      MEDIA.push({tipo:'img', src:a.thumb, txt:'Color '+m.objetivos[m.hechos].es.toLowerCase()+' · '+nombre(id)});
+      if (!m.nivel){ err('La foto salió movida: el Equilibrista no estaba nivelado. Repitan.'); break; }
+      if (a.ok){ m.hechos++; aviso('¡Color '+m.objetivos[m.hechos-1].es.toLowerCase()+' encontrado! ✓'); if(m.hechos>=m.objetivos.length) return completar(); }
+      else m.pendiente={ thumb:a.thumb, vio:a.vio };
+      break;
+    // --- misión 3: fotos contra el tiempo ---
+    case 'energia': if(m&&m.tipo==='fotos'&&id===quien('agitador')){ m.ultimaEnergia=Date.now(); m.energia=Math.min(100,m.energia+a.c*10); } return; // sin redibujar
+    case 'foto': if(!m||m.tipo!=='fotos'||id!==quien('fotografo')) return;
+      MEDIA.push({tipo:'img', src:a.thumb, txt:'Foto de '+nombre(id)});
+      if (a.etiquetas && a.etiquetas.includes(m.objetivos[m.hechos].ia)) { m.hechos++; aviso('La IA reconoció '+m.objetivos[m.hechos-1].es+'. ✓'); if(m.hechos>=m.objetivos.length) return completar(); }
+      else m.pendiente={ thumb:a.thumb, vio:(a.etiquetas||[]).join(', ') };
+      break;
+    case 'aprobar': if(!m||!['fotos','colores','sonidos'].includes(m.tipo)||id!==quien('profeta')||!m.pendiente) return;
+      m.pendiente=null; if(a.ok){ m.hechos++; if(m.hechos>=m.objetivos.length) return completar(); } else err('No sirvió. Intenten otra vez.');
+      break;
+    // --- misión 4: colección de sonidos ---
+    case 'sonido': if(!m||m.tipo!=='sonidos'||id!==quien('microfono')) return;
+      if (a.clip) MEDIA.push({tipo:'audio', src:a.clip, txt:m.objetivos[m.hechos]});
+      m.pendiente={ clip:a.clip, max:a.max }; break;
+    // --- misión 5: brújula ciega ---
+    case 'alineado': if(m&&m.tipo==='brujula'&&id===quien('navegador')) m.revelado=true; break;
+    case 'clave': if(!m||m.tipo!=='brujula'||id!==quien('profeta')) return;
+      if (a.w.trim().toUpperCase()===cp.palabra) return completar(); err('"'+a.w.toUpperCase()+'" no es la palabra.');
+      break;
+    // --- cierre ---
+    case 'terminar': if(id===quien('profeta') && S.fase==='cierre'){ S.fase='final'; S.stats.fin=Date.now(); buscarClima(); } break;
+  }
+  cambio();
+}
+function completar(){
+  const m=S.mision; S.stats.misiones.push({ tipo:m.tipo, seg:Math.round((Date.now()-m.inicio)/1000), errores:m.errores });
+  S.mision=null; S.cp++; S.fase='camino'; S.ayuda=false; S.aviso=null; S.celebrar=Date.now(); elegirNFC(); cambio();
+}
+function buscarClima(){ if (typeof fetch!=='function') return;
+  fetch('https://api.open-meteo.com/v1/forecast?latitude=-33.43&longitude=-70.63&current=temperature_2m,weather_code')
+    .then(r=>r.json()).then(d=>{ const c=d.current.weather_code, t=Math.round(d.current.temperature_2m);
+      const txt = c===0?'despejado':c<=3?'parcialmente nublado':c<=48?'neblina':c<=67?'lluvia':c<=77?'nieve':c<=82?'chubascos':'tormenta';
+      S.stats.clima = txt+', '+t+'°C'; cambio(); }).catch(()=>{});
+}
+let prev=null;
+function cambio(){ publicar(); avisos(prev,S); prev=JSON.parse(JSON.stringify(S)); render(); }
+
+/* ==========================================================================
+   6. JUGADORES SIMULADOS (probar sin otros celulares)
+   ========================================================================== */
+const B={};
+function tras(clave, ms, fn){ const k=clave+'|'+S.cp+'|'+S.fase; if(!B[k]) B[k]=Date.now(); else if(Date.now()-B[k]>=ms && !B[k+'!']){ B[k+'!']=1; fn(); } }
+const esBot = id => id && id.startsWith('bot');
+setInterval(()=>{
+  if (!simulado || !S) return; const m=S.mision, cp=S.fase!=='lobby'?cpAct():null;
+  if (S.fase==='camino' && esBot(S.nfcTurno)) tras('nfc', 3000, ()=>procesar(S.nfcTurno,{k:'nfc',n:cp.nfc}));
+  if (S.fase!=='mision' || !m) return;
+  if (m.tipo==='equilibrio'){
+    if (esBot(quien('equilibrista')) && !m.nivel) procesar(quien('equilibrista'),{k:'nivel',ok:true});
+    const t=m.orden[m.paso]; if (esBot(t) && m.nivel) tras('p'+m.paso+m.errores, 900, ()=>procesar(t,{k:'presionar'}));
+  }
+  if (m.tipo==='colores'){
+    if (esBot(quien('equilibrista')) && !m.nivel) procesar(quien('equilibrista'),{k:'nivel',ok:true});
+    if (esBot(quien('fotografo')) && !m.pendiente && m.nivel) tras('c'+m.hechos+m.errores, 5000, ()=>{ const o=m.objetivos[m.hechos]; procesar(quien('fotografo'),{k:'fotoColor',thumb:fotoFalsa(o.es.toLowerCase()),ok:true,vio:o.es.toLowerCase()}); });
+  }
+  if (m.tipo==='fotos'){
+    if (esBot(quien('agitador'))) procesar(quien('agitador'),{k:'energia',c:3});
+    if (esBot(quien('fotografo')) && !m.pendiente) tras('f'+m.hechos+m.errores, 6000, ()=>procesar(quien('fotografo'),{k:'foto',thumb:fotoFalsa(m.objetivos[m.hechos].es),etiquetas:[m.objetivos[m.hechos].ia]}));
+  }
+  if (m.tipo==='sonidos' && esBot(quien('microfono')) && !m.pendiente) tras('s'+m.hechos+m.errores, 4500, ()=>procesar(quien('microfono'),{k:'sonido',clip:null,max:70}));
+  if (m.tipo==='brujula' && esBot(quien('navegador'))) tras('b', 4000, ()=>procesar(quien('navegador'),{k:'alineado'}));
+}, 1000);
+function garabato(){ const c=document.createElement('canvas'); c.width=c.height=240; const x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,240,240); x.strokeStyle='#5B1B3A'; x.lineWidth=4; x.beginPath(); x.moveTo(40,200); for(let i=0;i<8;i++) x.lineTo(40+i*22, 200-i*20+(i%2)*15); x.stroke(); x.strokeRect(150,40,50,60); return c.toDataURL('image/jpeg',.5); }
+function fotoFalsa(t){ const c=document.createElement('canvas'); c.width=c.height=200; const x=c.getContext('2d'); x.fillStyle='#863B56'; x.fillRect(0,0,200,200); x.fillStyle='#E5C1A1'; x.font='bold 18px Nunito,sans-serif'; x.textAlign='center'; x.fillText('foto simulada:',100,90); x.fillText(t,100,118); return c.toDataURL('image/jpeg',.6); }
+
+/* ==========================================================================
+   7. AVISOS (notificación en pantalla + sonido + vibración en Android)
+   ========================================================================== */
+function toast(html, tipo){ const t=document.getElementById('toast');
+  t.innerHTML=`<div class="${tipo==='error'?'bg-terracotta':'bg-elderberry'} text-whitesand rounded-2xl px-4 py-3 shadow-xl border border-whitesand/25 text-sm font-bold">${html}</div>`;
+  t.style.transform='translate(-50%,0)'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.transform='',4500); }
+let AC=null; function bip(f=880,d=.15){ try{ AC=AC||new (window.AudioContext||window.webkitAudioContext)(); const o=AC.createOscillator(), g=AC.createGain(); o.frequency.value=f; g.gain.value=.08; o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime+d);}catch(e){} }
+function vibrar(p){ try{ navigator.vibrate && navigator.vibrate(p) }catch(e){} }
+function avisos(a,b){ if(!b) return;
+  if (b.fase==='mision' && (!a||a.fase!=='mision')){ toast('Nueva misión: '+MISIONES[b.mision.tipo].titulo); bip(); vibrar([120,60,120]); }
+  if (b.fase==='camino' && b.nfcTurno===miId && (!a||a.nfcTurno!==miId||a.cp!==b.cp)){ toast('¡Te toca a ti acercar el celular al próximo NFC!'); bip(660); vibrar(300); }
+  if (b.fase==='roles' && (!a||a.fase!=='roles')) bip(520);
+  if (b.aviso && (!a||a.avisoN!==b.avisoN)) toast(b.aviso, /\b(no|perd|adelant|acab|rechaz)/i.test(b.aviso)?'error':'');
+  if (b.celebrar && (!a||a.celebrar!==b.celebrar)){ toast('¡Misión cumplida! Sigan al próximo punto.'); bip(990,.25); vibrar(200); }
+}
+
+/* ==========================================================================
+   8. SENSORES (brújula, giroscopio, movimiento, micrófono, cámara + IA)
+   Todos tienen un "plan B" con botones si el celular no da permiso.
+   ========================================================================== */
+let limpiezas=[]; function alLimpiar(f){ limpiezas.push(f); }
+function limpiar(){ limpiezas.forEach(f=>{try{f()}catch(e){}}); limpiezas=[]; }
+let sensoresOK=false;
+async function pedirSensores(){
+  try{ if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission(); }catch(e){}
+  try{ if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) await DeviceMotionEvent.requestPermission(); }catch(e){}
+  sensoresOK=true; leerNFC(true); toast('Sensores activados'); render(true);
+}
+function escucharOrientacion(fn){ const h=e=>fn(e); addEventListener('deviceorientation',h); addEventListener('deviceorientationabsolute',h); alLimpiar(()=>{ removeEventListener('deviceorientation',h); removeEventListener('deviceorientationabsolute',h); }); }
+function rumboDe(e){ if (e.webkitCompassHeading!=null) return e.webkitCompassHeading; if (e.absolute && e.alpha!=null) return (360-e.alpha)%360; return null; }
+const difAng = (a,b)=>{ let d=Math.abs(a-b)%360; return d>180?360-d:d; };
+
+const MONTAJES = {
+  // Equilibrista: burbuja de nivel
+  nivel(el){ let ok=false, enviado=null, viaSensor=false;
+    const set = v=>{ ok=v; const b=$('burbuja'); if(b) b.classList.toggle('bg-poppy',!v), b.classList.toggle('bg-whitesand',v); const t=$('nivel-txt'); if(t) t.textContent=v?'Nivelado ✓':'Inclinado'; if(enviado!==v){ enviado=v; accion({k:'nivel',ok:v}); } };
+    escucharOrientacion(e=>{ if(e.beta==null) return; viaSensor=true; const x=Math.max(-40,Math.min(40,e.gamma||0)), y=Math.max(-40,Math.min(40,(e.beta||0)));
+      const b=$('burbuja'); if(b) b.style.transform=`translate(${x*1.5}px,${y*1.5}px)`; set(Math.abs(x)<8 && Math.abs(y)<8); });
+    const hb=$('nivel-hold'); if(hb){ const on=e=>{e.preventDefault(); if(!viaSensor) set(true)}, off=()=>{ if(!viaSensor) set(false) };
+      hb.addEventListener('pointerdown',on); hb.addEventListener('pointerup',off); hb.addEventListener('pointerleave',off); }
+    set(false);
+  },
+  // Agitador: sacudidas y toques
+  agitar(el){ let c=0, ult=0;
+    const h=e=>{ const a=e.accelerationIncludingGravity; if(!a) return; const g=Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z); if(Math.abs(g-9.8)>6 && Date.now()-ult>120){ c++; ult=Date.now(); } };
+    addEventListener('devicemotion',h); alLimpiar(()=>removeEventListener('devicemotion',h));
+    const bt=$('tap'); if(bt) bt.addEventListener('pointerdown',e=>{e.preventDefault(); c++; bt.classList.add('scale-95'); setTimeout(()=>bt.classList.remove('scale-95'),80); });
+    const iv=setInterval(()=>{ if(c>0){ accion({k:'energia',c}); c=0; } },700); alLimpiar(()=>clearInterval(iv));
+  },
+  // Micrófono: graba 3 segundos y mide si se escuchó fuerte
+  grabadora(el){ let stream=null, ac=null, an=null, buf=null;
+    const medir=()=>{ if(!an) return 0; an.getByteTimeDomainData(buf); let s=0; for(const v of buf){ const d=(v-128)/128; s+=d*d; } return Math.min(100, Math.sqrt(s/buf.length)*300); };
+    const b=$('grabar'), est=$('mic-estado'), barra=$('t-vol');
+    b.onclick=async()=>{ b.disabled=true;
+      try{ if(!stream){ stream=await navigator.mediaDevices.getUserMedia({audio:true}); ac=new (window.AudioContext||window.webkitAudioContext)(); an=ac.createAnalyser(); an.fftSize=512; buf=new Uint8Array(an.fftSize); ac.createMediaStreamSource(stream).connect(an); alLimpiar(()=>{ stream.getTracks().forEach(t=>t.stop()); ac.close(); }); } }
+      catch(e){ est.textContent='Sin micrófono: se envía una grabación simulada.'; setTimeout(()=>accion({k:'sonido',clip:null,max:80}),1500); return; }
+      let max=0, partes=[], rec=null; try{ rec=new MediaRecorder(stream,{audioBitsPerSecond:24000}); rec.ondataavailable=e=>partes.push(e.data); rec.start(); }catch(e){}
+      const t0=Date.now(); est.textContent='Grabando… ¡ahora!';
+      const iv=setInterval(()=>{ const v=medir(); max=Math.max(max,v); if(barra) barra.style.width=v+'%'; b.textContent='● '+Math.max(0,3-Math.floor((Date.now()-t0)/1000))+' s';
+        if (Date.now()-t0<3000) return; clearInterval(iv);
+        const fin=clip=>{ b.disabled=false; b.textContent='● Grabar 3 segundos';
+          if (max<UMBRAL_SONIDO){ est.textContent='Se escuchó muy bajo. ¡Más fuerte, todos!'; return; }
+          est.textContent='Enviado al Profeta para que lo escuche.'; accion({k:'sonido',clip,max:Math.round(max)}); };
+        if (rec){ rec.onstop=()=>{ const bl=new Blob(partes,{type:rec.mimeType}); if(bl.size>150000) return fin(null); const fr=new FileReader(); fr.onload=()=>fin(fr.result); fr.readAsDataURL(bl); }; rec.stop(); } else fin(null);
+      },100); alLimpiar(()=>clearInterval(iv));
+    };
+  },
+  // Navegador: brújula hacia un rumbo (camino o misión)
+  brujula(el){ const meta=parseFloat(el.dataset.rumbo), mision=el.dataset.mision==='1'; let rumbo=0, viaSensor=false, acum=0, latido=0;
+    escucharOrientacion(e=>{ const r=rumboDe(e); if(r!=null){ viaSensor=true; rumbo=r; } });
+    const sl=$('rumbo-slider'); if(sl) sl.addEventListener('input',()=>{ if(!viaSensor) rumbo=parseFloat(sl.value); });
+    const iv=setInterval(()=>{ const flecha=$('flecha'); if(flecha) flecha.style.transform=`rotate(${meta-rumbo}deg)`;
+      const d=difAng(meta,rumbo), cerca=d<15, txt=$('rumbo-txt'); if(txt) txt.textContent = cerca?'¡Es por aquí!':(Math.round(d)+'° de diferencia');
+      const anillo=$('anillo'); if(anillo) anillo.classList.toggle('late',cerca);
+      if (cerca && Date.now()-latido>900){ latido=Date.now(); bip(1200,.06); vibrar(60); }
+      if (mision){ acum = cerca ? acum+0.1 : 0; if(acum>=3){ acum=-999; accion({k:'alineado'}); } }
+    },100); alLimpiar(()=>clearInterval(iv));
+  },
+  // Dibujo con el dedo
+  dibujo(el){ const c=$('lienzo'), x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height); x.strokeStyle='#5B1B3A'; x.lineWidth=5; x.lineCap='round'; x.lineJoin='round';
+    let on=false; const p=e=>{ const r=c.getBoundingClientRect(); return [(e.clientX-r.left)*c.width/r.width,(e.clientY-r.top)*c.height/r.height]; };
+    c.addEventListener('pointerdown',e=>{ on=true; x.beginPath(); x.moveTo(...p(e)); });
+    c.addEventListener('pointermove',e=>{ if(on){ x.lineTo(...p(e)); x.stroke(); } });
+    ['pointerup','pointerleave'].forEach(ev=>c.addEventListener(ev,()=>on=false));
+    $('borrar').onclick=()=>{ x.fillRect(0,0,c.width,c.height); };
+    $('enviar-dibujo').onclick=()=>accion({k:'dibujo',img:c.toDataURL('image/jpeg',.5)});
+  },
+};
+
+// Cámara + IA de objetos (COCO-SSD, corre en el mismo celular)
+let modeloIA=null, cargandoIA=null;
+function cargarIA(){ if(cargandoIA) return cargandoIA;
+  cargandoIA = new Promise(res=>{ const s1=document.createElement('script'); s1.src='https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js';
+    s1.onload=()=>{ const s2=document.createElement('script'); s2.src='https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js';
+      s2.onload=()=>cocoSsd.load().then(m=>{modeloIA=m;res(m)}).catch(()=>res(null)); s2.onerror=()=>res(null); document.head.appendChild(s2); };
+    s1.onerror=()=>res(null); document.head.appendChild(s1); }); return cargandoIA; }
+function tomarFoto(inp){ const f=inp.files[0]; if(!f) return; const st=$('foto-estado'); st.textContent='Analizando la foto…';
+  const r=new FileReader(); r.onload=()=>{ const img=new Image(); img.onload=async()=>{
+    const c=document.createElement('canvas'), W=360, H=Math.round(360*img.height/img.width); c.width=W; c.height=H; c.getContext('2d').drawImage(img,0,0,W,H);
+    let etiquetas=[]; const m=await Promise.race([cargarIA(), new Promise(r=>setTimeout(()=>r(null),12000))]);
+    if (m){ try{ etiquetas=(await m.detect(c)).filter(p=>p.score>.45).map(p=>p.class); }catch(e){} }
+    st.textContent = m ? ('La IA ve: '+(etiquetas.join(', ')||'nada reconocible')) : 'IA no disponible: el Profeta revisará la foto';
+    accion({k:'foto', thumb:c.toDataURL('image/jpeg',.55), etiquetas}); };
+    img.src=r.result; }; r.readAsDataURL(f); inp.value=''; }
+function tomarFotoColor(inp){ const f=inp.files[0]; if(!f) return; const st=$('foto-estado'); st.textContent='Analizando colores…';
+  const r=new FileReader(); r.onload=()=>{ const img=new Image(); img.onload=()=>{
+    const c=document.createElement('canvas'), W=200, H=Math.round(200*img.height/img.width); c.width=W; c.height=H; const x=c.getContext('2d'); x.drawImage(img,0,0,W,H);
+    const d=x.getImageData(0,0,W,H).data, cuenta={}; let total=0;
+    for(let i=0;i<d.length;i+=16){ const [h,s,l]=hsl(d[i],d[i+1],d[i+2]); total++; if(s<.35||l<.18||l>.85) continue; const col=COLORES.find(k=>k.h.some(([a,b])=>h>=a&&h<b)); if(col) cuenta[col.id]=(cuenta[col.id]||0)+1; }
+    const obj=S.mision.objetivos[S.mision.hechos], pct=(cuenta[obj.id]||0)/Math.max(1,total)*100;
+    const top=Object.entries(cuenta).sort((a,b)=>b[1]-a[1])[0], vio=top?COLORES.find(k=>k.id===top[0]).es.toLowerCase():'sin color claro';
+    st.textContent=obj.es.toLowerCase()+': '+Math.round(pct)+'% de la foto · color principal: '+vio;
+    accion({k:'fotoColor', thumb:c.toDataURL('image/jpeg',.6), ok:pct>=PORC_COLOR, vio}); };
+    img.src=r.result; }; r.readAsDataURL(f); inp.value=''; }
+function hsl(r,g,b){ r/=255; g/=255; b/=255; const mx=Math.max(r,g,b), mn=Math.min(r,g,b), l=(mx+mn)/2; if(mx===mn) return [0,0,l];
+  const d=mx-mn, s=l>.5?d/(2-mx-mn):d/(mx+mn); const h = mx===r?(g-b)/d+(g<b?6:0) : mx===g?(b-r)/d+2 : (r-g)/d+4; return [h*60,s,l]; }
+// NFC dentro de la página (Chrome en Android). Mientras está activo, Android NO abre pestañas nuevas:
+// la lectura llega directo al juego. Se activa una vez (con "Activar sensores") y queda encendido.
+let nfcActivo=false;
+async function leerNFC(silencioso){ if(!('NDEFReader' in window) || nfcActivo) return;
+  try{ const r=new NDEFReader(); await r.scan(); nfcActivo=true; if(!silencioso) toast('NFC activado: cuando te toque, solo acerca el celular al sticker.');
+    r.onreading=e=>{ let n=null; for(const rec of e.message.records){ try{ n=n||parseInt(((new TextDecoder().decode(rec.data)).match(/nfc=(\d+)/)||[])[1]); }catch(x){} }
+      if(!n) return toast('Ese sticker no es de Tupahue.','error');
+      if(S && S.fase==='camino') accion({k:'nfc',n}); else toast('Todavía no es momento de tocar un NFC.','error'); };
+    render(true);
+  }catch(e){ if(!silencioso) toast('No se pudo activar el NFC: '+e.message,'error'); } }
+function grabar(stream){ try{ const rec=new MediaRecorder(stream,{audioBitsPerSecond:24000}), partes=[];
+  rec.ondataavailable=e=>partes.push(e.data); rec.onstop=()=>{ const b=new Blob(partes,{type:rec.mimeType}); if(b.size>150000) return; const fr=new FileReader(); fr.onload=()=>accion({k:'audio',clip:fr.result}); fr.readAsDataURL(b); };
+  rec.start(); setTimeout(()=>rec.state!=='inactive'&&rec.stop(), 5000); }catch(e){} }
+
+/* ==========================================================================
+   9. PANTALLAS
+   ========================================================================== */
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let estadoRed='sin conexión'; function red(t){ estadoRed=t; const e=$('estado-red'); if(e) e.textContent=t; }
+const btn=(txt,on,cls='bg-poppy')=>`<button onclick="${on}" class="w-full py-3.5 rounded-2xl ${cls} text-whitesand font-brand text-lg font-semibold shadow-lg active:scale-95 transition">${txt}</button>`;
+const atras=on=>`<button onclick="${on}" class="w-9 h-9 rounded-full bg-ashwagandha/60 text-whitesand flex items-center justify-center">‹</button>`;
+const avatar=(r,c='w-12 h-12')=>`<div class="${c} rounded-xl bg-grass/60 border border-whitesand/20 p-0.5 shrink-0">${IMG_OK['rol-'+r]?png('rol-'+r,'w-full h-full object-contain'):AVATAR[r]}</div>`;
+const chipRoles=id=>misRoles(id).map(r=>ROLES[r].nombre).join(' + ');
+
+let ultimaClave='';
+function clave(){ if(!S) return 'L|'+vista+'|'+!!perfil; const m=S.mision;
+  return [S.fase,S.cp,S.nfcTurno,S.ruta,S.jugadores.length,S.ayuda,sensoresOK, m&&m.tipo, m&&m.paso!==undefined&&m.tipo==='dibujo'?m.paso:'', m&&m.revelado, m&&m.etapa, m&&m.hechos, m&&!!m.pendiente].join('|'); }
+function render(forzar){ const k=clave(); if(forzar||k!==ultimaClave){ limpiar(); $('app').innerHTML=pantalla(); ultimaClave=k;
+    document.querySelectorAll('[data-montar]').forEach(el=>MONTAJES[el.dataset.montar](el)); window.scrollTo(0,0); }
+  vivo(); }
+// Actualiza números que cambian seguido sin redibujar toda la pantalla
+function vivo(){ if(!S||!S.mision) return; const m=S.mision, set=(id,f)=>{ const e=$(id); if(e) f(e); };
+  if (m.tipo==='equilibrio'){ set('t-paso',e=>e.textContent=m.paso); set('t-nivel',e=>{ e.textContent=m.nivel?'Equilibrista nivelado ✓':'Equilibrista inclinado ✗'; e.className=m.nivel?'text-whitesand':'text-poppy'; }); }
+  if (m.tipo==='fotos'){ set('t-tiempo',e=>e.textContent=Math.max(0,m.tiempo)+' s'); set('t-barra',e=>e.style.width=Math.max(0,m.tiempo/TIEMPO_FOTOS*100)+'%'); set('t-energia',e=>e.style.width=m.energia+'%'); }
+  if (m.tipo==='colores') set('t-nivel',e=>{ e.textContent=m.nivel?'trípode nivelado ✓':'trípode inclinado ✗'; e.className=m.nivel?'text-whitesand':'text-poppy'; });
+}
+
+function pantalla(){
+  if (!S){ if(vista==='bienvenida') return pBienvenida(); if(!perfil) return pRegistro(); return vista==='unirse'?pUnirse():pInicio(); }
+  return ({ lobby:pLobby, roles:pRoles, revelar:pRevelar, camino:pCamino, mision:pMision, cierre:pCierre, final:pFinal })[S.fase]();
+}
+
+function pBienvenida(){ return `<div class="entra min-h-[100dvh] flex flex-col bg-whitesand">
+  <div class="text-center px-6 pt-16"><span class="px-3 py-1 rounded-full bg-ashwagandha/10 text-xs font-bold uppercase tracking-widest">Exploración urbana</span>
+    ${IMG_OK.logo?png('logo','mx-auto mt-2 max-h-28'):'<h1 class="text-[58px] leading-none font-bold mt-2">Tupahue</h1>'}<p class="mt-2 text-sm font-bold text-terracotta">Descubre tu ciudad jugando en equipo</p>
+    <button onclick="vista=perfil?'inicio':'registro';render()" class="mt-9 w-full max-w-[260px] py-4 rounded-full bg-poppy text-whitesand font-brand text-lg font-semibold shadow-lg active:scale-95">Inicia la aventura →</button></div>
+  <div class="relative mt-auto h-[330px]"><div class="flota absolute right-12 top-14 w-11 h-11 rounded-full bg-poppy/85"></div>
+    <div class="absolute inset-x-0 top-24 text-center z-10"><span class="font-brand text-xl font-bold bg-whitesand/80 px-4 py-1 rounded-full border border-ashwagandha/20">¡Hola!</span></div>${IMG_OK['fondo-inicio']?png('fondo-inicio','absolute inset-0 w-full h-full object-cover'):MONTANAS}</div></div>`; }
+
+function pRegistro(){ return `<div class="entra min-h-[100dvh] bg-grass px-6 pt-6 pb-10 flex flex-col">
+  <div class="flex justify-between items-center">${atras("vista='bienvenida';render()")}<span class="text-xs font-bold uppercase tracking-widest text-whitesand/80">Solo la primera vez</span></div>
+  <div class="text-center mt-4"><h1 class="text-[46px] leading-none font-bold text-whitesand">Tupahue</h1><p class="text-xs font-bold text-whitesand/90">juego urbano colectivo</p></div>
+  <div class="mt-8 bg-ashwagandha/85 rounded-[30px] p-6 shadow-xl border border-whitesand/20">
+    <h2 class="text-xl font-semibold text-whitesand text-center mb-4">¿Primera vez aquí?</h2>
+    <label class="block text-xs font-bold text-whitesand/90 mb-1 ml-2">Nombre</label>
+    <input id="r-n" placeholder="amy" class="w-full px-4 py-3.5 rounded-2xl bg-elderberry/60 border border-whitesand/25 font-semibold outline-none focus:border-poppy">
+    <label class="block text-xs font-bold text-whitesand/90 mb-1 mt-4 ml-2">Correo</label>
+    <input id="r-c" type="email" placeholder="amy@tupahue.cl" class="w-full px-4 py-3.5 rounded-2xl bg-elderberry/60 border border-whitesand/25 font-semibold outline-none focus:border-poppy">
+    <label class="flex gap-2 items-center mt-4 text-xs font-bold text-whitesand/90"><input id="r-e" type="checkbox" class="w-5 h-5 accent-[#D6533F]"> Soy mayor de 18 años</label>
+    <div class="mt-5">${btn('Entrar','registrar()')}</div></div></div>`; }
+
+function cardRuta(r){ return `<div class="snap-start shrink-0 w-[230px] ${r.activa?'bg-terracotta':'bg-wine opacity-80'} rounded-[26px] p-4 border-2 border-whitesand/20 text-whitesand">
+  <div class="flex justify-between text-xs font-bold"><span class="px-2.5 py-0.5 rounded-full bg-poppy uppercase">${r.activa?r.etiqueta:'próximamente'}</span><span>${r.tiempo}</span></div>
+  <h3 class="text-lg font-bold mt-2">${r.nombre}</h3><p class="text-xs text-whitesand/80">${r.lugar}</p><p class="text-xs mt-1 text-whitesand/90 leading-snug">${r.bajada}</p>
+  <div class="mt-3 pt-2 border-t border-whitesand/15 text-xs font-bold flex justify-between"><span>${r.checkpoints?r.checkpoints.length:4} puntos</span><span>${dif(r.dificultad)}</span></div></div>`; }
+
+function pInicio(){ const op=(ico,t,s,on)=>`<button onclick="${on}" class="w-full text-left px-4 py-3 rounded-2xl bg-ashwagandha/90 flex items-center gap-3 active:scale-[.98] transition">
+    <span class="w-10 h-10 rounded-xl bg-poppy text-whitesand font-brand font-bold flex items-center justify-center">${ico}</span>
+    <span><span class="block text-sm font-bold text-whitesand">${t}</span><span class="block text-xs text-whitesand/75">${s}</span></span></button>`;
+  return `<div class="entra min-h-[100dvh] bg-grass pb-12">
+  <div class="relative h-[170px] px-5 pt-4 text-center overflow-hidden">${PICO}
+    <div class="relative z-10 flex justify-end"><span class="px-2.5 py-0.5 rounded-full bg-elderberry/75 text-whitesand text-xs font-bold">Hola, ${esc(perfil.nombre)}</span></div>
+    <div class="relative z-10 mt-3"><h1 class="text-[44px] leading-none font-bold text-whitesand drop-shadow">Tupahue</h1><p class="font-brand text-sm font-semibold text-whitesand bg-elderberry/70 inline-block px-3.5 py-0.5 rounded-full mt-1">Juega en grupo</p></div></div>
+  <div class="px-5 space-y-2.5">${op('✦','Crear sala','Serás el Profeta del grupo',"crearSala(false)")}${op('#','Unirse con código','Únete a la sala de un compañero',"vista='unirse';render()")}${op('⚡','Probar con jugadores simulados','Para practicar sin otros celulares',"crearSala(true)")}</div>
+  <div class="mt-5 px-5"><h2 class="font-bold uppercase tracking-wider text-whitesand mb-2">Rutas</h2>
+    <div class="flex gap-3 overflow-x-auto no-scroll pb-2 snap-x">${RUTAS.map(cardRuta).join('')}</div>
+    <p class="text-center mt-4"><button onclick="salirPerfil()" class="text-xs font-bold text-whitesand/70 underline">no soy ${esc(perfil.nombre)}</button></p></div></div>`; }
+
+function pUnirse(){ return `<div class="entra min-h-[100dvh] bg-grass px-6 pt-6"><div>${atras("vista='inicio';render()")}</div>
+  <div class="mt-10 bg-ashwagandha/85 rounded-[30px] p-6 border border-whitesand/20"><h2 class="text-xl font-semibold text-whitesand text-center">Código de la sala</h2>
+  <input id="u-c" maxlength="4" class="mt-4 w-full text-center font-brand text-4xl tracking-[.4em] uppercase px-4 py-4 rounded-2xl bg-elderberry/60 border border-whitesand/25 outline-none">
+  <div class="mt-5">${btn('Unirme','unirse()')}</div></div></div>`; }
+
+function pLobby(){ const host=S.jugadores[0].id===miId;
+  return `<div class="entra min-h-[100dvh] bg-[#f7eadc] px-4 pt-4 pb-40">
+  <div class="flex items-center justify-between"><span class="text-xs font-extrabold uppercase tracking-wider text-wine">Lobby de equipo</span>
+    ${simulado&&host?`<span class="flex gap-1"><button onclick="accion({k:'bot-'})" class="px-2.5 py-1 rounded-full bg-wine/15 text-elderberry text-xs font-extrabold">- Bot</button><button onclick="accion({k:'bot+'})" class="px-2.5 py-1 rounded-full bg-wine/15 text-elderberry text-xs font-extrabold">+ Bot</button></span>`:''}</div>
+  <div class="mt-3 bg-white rounded-[24px] py-4 text-center shadow-sm"><p class="text-xs font-bold">Código para tus compañeros</p><p class="font-brand text-[38px] font-bold tracking-[.25em] text-elderberry">${S.codigo}</p><p id="estado-red" class="text-xs font-bold text-wine">${estadoRed}</p></div>
+  <div class="mt-3 bg-white rounded-[24px] p-4 shadow-sm"><h2 class="text-sm font-extrabold text-elderberry mb-2">Jugadores (${S.jugadores.length}/6)</h2>
+    <div class="flex flex-wrap gap-2">${S.jugadores.map(j=>`<span class="px-3 py-1 rounded-full text-xs font-extrabold ${j.id===miId?'bg-elderberry text-whitesand':'bg-wine/15 text-wine'}">${esc(j.nombre)}</span>`).join('')}</div>
+    <p class="text-xs mt-2 text-ashwagandha/70">Con menos de 6 personas, algunos tendrán 2 roles.</p></div>
+  ${RUTAS.map(r=>`<div class="mt-3 bg-white rounded-[26px] p-4 shadow-sm border ${S.ruta===r.id?'border-poppy':'border-transparent'} ${r.activa?'':'opacity-70'}">
+    <div class="flex gap-2 items-center"><h3 class="font-extrabold text-elderberry">${r.nombre}</h3>${r.activa?'':'<span class="px-2 py-0.5 rounded-full bg-wine/15 text-wine text-xs font-bold">próximamente</span>'}</div>
+    <p class="text-xs font-bold text-terracotta/80">${r.lugar}</p><p class="text-xs font-semibold mt-2">${r.bajada}</p>
+    <div class="mt-2 pt-2 border-t border-whitesand/40 text-xs space-y-1">
+      <div class="flex justify-between"><span>Tiempo</span><b class="text-elderberry">${r.tiempo}</b></div><div class="flex justify-between"><span>Puntos</span><b class="text-elderberry">${r.checkpoints?r.checkpoints.length:4}</b></div>
+      <div class="flex justify-between"><span>Grupos que la completaron</span><b class="text-elderberry">${r.completada}</b></div><div class="flex justify-between"><span>Dificultad</span><b class="text-poppy">${dif(r.dificultad)}</b></div></div>
+    ${r.activa&&host?`<button onclick="accion({k:'ruta',ruta:'${r.id}'})" class="mt-3 w-full py-2.5 rounded-2xl ${S.ruta===r.id?'bg-poppy':'bg-wine/20 text-elderberry'} text-white font-bold text-sm">${S.ruta===r.id?'✓ elegida':'elegir'}</button>`:''}</div>`).join('')}
+  <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[440px] px-4 pt-6 pb-9 bg-gradient-to-t from-[#f7eadc] via-[#f7eadc] to-transparent">
+    ${host?(S.jugadores.length<2?'<p class="text-center text-xs font-bold text-wine">Se necesitan al menos 2 jugadores</p>':btn('Repartir roles →',"accion({k:'comenzar'})",'bg-elderberry')):`<p class="text-center text-sm font-bold text-elderberry">Esperando que ${esc(S.jugadores[0].nombre)} reparta los roles…</p>`}</div></div>`; }
+
+function pRoles(){ const prof=quien('profeta')===miId;
+  if (!prof) return `<div class="entra min-h-[100dvh] bg-grass px-6 flex flex-col justify-center text-center text-whitesand">${avatar('profeta','w-24 h-24 mx-auto')}
+    <h1 class="text-3xl font-bold mt-4">Escucha al Profeta</h1><p class="mt-2 text-sm text-whitesand/90"><b>${esc(nombre(quien('profeta')))}</b> está leyendo los roles del grupo. Cuando termine, verás el tuyo aquí.</p></div>`;
+  return `<div class="entra min-h-[100dvh] bg-grass px-5 pt-5 pb-10">
+  <h1 class="text-2xl font-bold text-whitesand text-center">Eres el Profeta</h1><p class="text-center text-xs font-semibold text-whitesand/85 mb-3">Lee en voz alta el rol de cada persona. Ellos aún no lo ven.</p>
+  <div class="space-y-2.5">${ORDEN_ROLES.map(r=>`<div class="p-2.5 rounded-2xl bg-ashwagandha/90 flex items-center gap-3">${avatar(r)}
+    <div class="flex-1 min-w-0"><div class="flex justify-between gap-1"><span class="font-brand font-bold text-whitesand">${ROLES[r].nombre}</span><span class="text-xs font-bold px-2 py-0.5 rounded-full bg-poppy text-whitesand">${esc(nombre(S.roles[r]))}</span></div>
+    <p class="text-xs text-whitesand/90 leading-snug">${ROLES[r].desc}</p></div></div>`).join('')}</div>
+  <div class="mt-4">${btn('Ya les conté sus roles ✓',"accion({k:'rolesListos'})",'bg-elderberry')}</div></div>`; }
+
+function pRevelar(){ const mis=misRoles(), prof=tengo('profeta');
+  return `<div class="entra min-h-[100dvh] bg-grass px-5 py-10 flex flex-col justify-center text-whitesand"><p class="text-center text-xs font-bold uppercase tracking-widest text-whitesand/80">Tu rol</p>
+  ${mis.map(r=>`<div class="mt-3 p-4 rounded-[26px] bg-poppy border-2 border-whitesand flex items-center gap-3 shadow-lg">${avatar(r,'w-16 h-16')}<div><h2 class="text-xl font-bold">${ROLES[r].nombre}</h2><span class="text-xs font-bold px-2 py-0.5 rounded-full bg-elderberry">${ROLES[r].habilidad}</span><p class="text-xs mt-1">${ROLES[r].desc}</p></div></div>`).join('')}
+  ${!sensoresOK?`<div class="mt-4">${btn('Activar sensores del celular','pedirSensores()','bg-elderberry')}<p class="text-xs text-center mt-1 text-whitesand/75">Necesario en iPhone para brújula, giroscopio y movimiento. En Android también activa el NFC (así no se abren pestañas nuevas).</p></div>`:''}
+  ${prof?`<div class="mt-5 bg-elderberry rounded-[26px] p-4 border border-whitesand/20"><p class="text-xs font-bold uppercase tracking-wider text-poppy">Lee en voz alta</p><p class="mt-1 text-base leading-relaxed">${ruta().intro}</p></div><div class="mt-4">${btn('Comenzar el recorrido →',"accion({k:'iniciar'})")}</div>`
+        :`<p class="mt-6 text-center text-sm font-bold">Escucha al Profeta: va a contar la historia de la ruta.</p>`}</div>`; }
+
+function mapaSVG(){ const n=ruta().checkpoints.length;
+  return `<div class="relative w-full h-[330px]"><svg viewBox="0 0 375 330" class="w-full h-full"><ellipse cx="188" cy="165" rx="175" ry="160" fill="#5C4E16" opacity=".22"/>
+    <path d="M110 300 C240 270,250 240,130 195 C40 160,230 150,220 120 C200 80,120 95,150 60 C170 35,220 40,210 20" fill="none" stroke="#87332B" stroke-width="30" stroke-linecap="round"/>
+    <path d="M110 300 C240 270,250 240,130 195 C40 160,230 150,220 120 C200 80,120 95,150 60 C170 35,220 40,210 20" fill="none" stroke="#E5C1A1" stroke-width="22" stroke-linecap="round"/>
+    <path d="M110 300 C240 270,250 240,130 195 C40 160,230 150,220 120 C200 80,120 95,150 60 C170 35,220 40,210 20" fill="none" stroke="#87332B" stroke-width="2.5" stroke-dasharray="6 8"/>
+    ${arbol(55,70,1.1)}${arbol(310,80,1.1)}${arbol(320,200,1)}${arbol(45,240,1.1)}${arbol(285,290,1)}${arbol(60,300,.9)}${arbol(250,170,.8)}</svg>
+    ${ruta().checkpoints.map((c,i)=>{ const hecho=i<S.cp, act=i===S.cp; return `<div style="left:${POS[i][0]}%;top:${POS[i][1]}%" class="absolute -translate-x-1/2 -translate-y-1/2 text-center">
+      <div class="relative inline-flex ${act?'late':''}"><span class="relative z-10 w-9 h-9 rounded-full flex items-center justify-center font-brand font-bold text-sm border-2 border-whitesand shadow-lg ${hecho?'bg-ashwagandha':act?'bg-poppy':'bg-elderberry'} text-whitesand">${hecho?'✓':i+1}</span></div>
+      <span class="block mt-0.5 px-1.5 py-0.5 rounded-lg bg-elderberry/90 text-whitesand text-xs font-bold whitespace-nowrap">${c.lugar}</span></div>`; }).join('')}</div>`; }
+
+function widgetBrujula(rumbo, mision){ return `<div data-montar="brujula" data-rumbo="${rumbo}" data-mision="${mision?1:0}" class="text-center">
+  <div id="anillo" class="relative mx-auto w-40 h-40 rounded-full bg-elderberry border-4 border-whitesand flex items-center justify-center">
+    <svg id="flecha" viewBox="0 0 100 100" class="relative z-10 w-28 h-28 transition-transform duration-100"><polygon points="50,6 64,58 50,48 36,58" fill="#D6533F"/><polygon points="50,94 64,58 50,66 36,58" fill="#E5C1A1"/></svg></div>
+  <p id="rumbo-txt" class="mt-2 text-sm font-bold text-whitesand">gira el celular</p>
+  <input id="rumbo-slider" type="range" min="0" max="359" value="0" class="w-full mt-2 accent-[#D6533F]"><p class="text-xs text-whitesand/70">Si tu celular no tiene brújula, gira con la barra.</p></div>`; }
+
+function pCamino(){ const cp=cpAct(), prof=tengo('profeta'), nav=tengo('navegador'), meToca=S.nfcTurno===miId;
+  return `<div class="entra min-h-[100dvh] bg-grass pb-10">
+  <div class="px-4 pt-3 flex justify-between items-center"><span class="px-3 py-1 rounded-full bg-ashwagandha/90 text-whitesand text-xs font-bold">${chipRoles(miId)}</span>
+    <span class="px-3 py-1 rounded-full bg-elderberry/90 text-whitesand text-xs font-bold">${ruta().nombre} · ${S.cp}/${ruta().checkpoints.length}</span></div>
+  ${mapaSVG()}
+  <div class="mx-4 -mt-2 bg-ashwagandha rounded-[26px] p-4 shadow-xl border border-whitesand/25 text-whitesand space-y-3">
+    <div><p class="text-xs font-bold uppercase tracking-wider text-whitesand/75">Próximo punto ${S.cp+1}</p><h2 class="text-lg font-bold">${prof?cp.lugar:'???'}</h2></div>
+    ${prof?`<div class="bg-elderberry rounded-2xl p-3"><p class="text-xs font-bold uppercase text-poppy">Pista (léela al grupo)</p><p class="text-base font-semibold">${cp.pista}</p>${S.ayuda?`<p class="text-xs mt-1 text-whitesand/85">Ayuda: el lugar es "${cp.lugar}".</p>`:''}</div>`
+          :`<p class="text-sm">Pregúntale al Profeta (<b>${esc(nombre(quien('profeta')))}</b>) por la pista.</p>`}
+    ${nav?`<div class="bg-elderberry/60 rounded-2xl p-3"><p class="text-xs font-bold uppercase text-poppy mb-1">Tu brújula: dirección general</p>${widgetBrujula(cp.rumbo,false)}</div>`:''}
+    <div class="rounded-2xl p-3 ${meToca?'bg-poppy':'bg-wine/60'}"><p class="text-sm font-bold">${meToca?'¡Te toca a ti! Al llegar, acerca tu celular al NFC '+cp.nfc+'.':'Al llegar, el NFC lo debe tocar: '+esc(nombre(S.nfcTurno))}</p>
+      ${'NDEFReader' in window?(nfcActivo?`<p class="text-xs mt-1">✓ NFC activo en este celular</p>`:`<button onclick="leerNFC()" class="mt-2 w-full py-3 rounded-xl bg-elderberry text-whitesand font-bold">((·)) Activar NFC (Android)</button>`):''}${meToca?`<button onclick="accion({k:'nfc',n:${cp.nfc}})" class="mt-2 w-full py-2.5 rounded-xl bg-whitesand/15 text-whitesand text-sm font-bold">Simular NFC ${cp.nfc} (prueba)</button>`:''}</div>
+    ${prof&&!S.ayuda?`<button onclick="accion({k:'ayuda'})" class="w-full py-2 rounded-xl bg-whitesand/15 text-xs font-bold">Pedir ayuda (cuenta en las estadísticas)</button>`:''}</div></div>`; }
+
+function cabeceraMision(){ const m=S.mision, cp=cpAct(); return `<div class="flex justify-between items-center"><span class="px-3 py-1 rounded-full bg-wine text-whitesand text-xs font-bold">Punto ${S.cp+1} · ${cp.lugar}</span><span class="text-xs font-bold text-whitesand/80">${chipRoles(miId)}</span></div>
+  <div class="mt-3 bg-wine rounded-[28px] p-4 border border-whitesand/25 shadow-xl"><span class="px-2.5 py-0.5 rounded-full bg-poppy text-whitesand text-xs font-bold uppercase">Misión colectiva</span>
+  <h1 class="text-xl font-bold text-whitesand mt-1">${MISIONES[m.tipo].titulo}</h1>${tengo('profeta')?`<p class="text-base text-whitesand mt-2 leading-snug"><b class="text-poppy">Lee en voz alta:</b> ${MISIONES[m.tipo].resumen}</p>`:`<p class="text-xs text-whitesand/80 mt-1">El Profeta les explica la misión.</p>`}</div>`; }
+const cajaNivel=t=>caja(t, `<div data-montar="nivel" class="text-center"><div class="relative mx-auto w-40 h-40 rounded-full bg-elderberry border-4 border-whitesand overflow-hidden"><div class="absolute inset-[45%] rounded-full border-2 border-whitesand/50"></div><div id="burbuja" class="absolute left-1/2 top-1/2 -ml-5 -mt-5 w-10 h-10 rounded-full bg-poppy transition-transform"></div></div>
+      <p id="nivel-txt" class="mt-2 font-bold">Inclinado</p><button id="nivel-hold" class="holdable mt-2 w-full py-3 rounded-xl bg-whitesand/15 text-xs font-bold">Sin giroscopio: mantén presionado para "nivelar"</button></div>`);
+const siNo=()=>`<div class="flex gap-2"><button onclick="accion({k:'aprobar',ok:true})" class="flex-1 py-3 rounded-xl bg-poppy font-bold">Sí</button><button onclick="accion({k:'aprobar',ok:false})" class="flex-1 py-3 rounded-xl bg-whitesand/15 font-bold">No</button></div>`;
+const caja=(titulo,html)=>`<div class="mt-3 bg-ashwagandha/95 rounded-[24px] p-4 border border-whitesand/20 text-whitesand"><p class="text-xs font-bold uppercase tracking-wider text-poppy mb-2">${titulo}</p>${html}</div>`;
+
+function pMision(){ const m=S.mision, cp=cpAct(); let h='';
+  if (m.tipo==='equilibrio'){
+    if (tengo('equilibrista')) h+=cajaNivel('Equilibrista: mantén el celular plano');
+    const n=m.orden.indexOf(miId)+1;
+    h+=caja('Tu número', `<div class="text-center"><p class="font-brand text-6xl font-bold">${n}</p><p class="text-xs mt-1">Van en el <b id="t-paso">${m.paso}</b> de ${m.orden.length} · <span id="t-nivel"></span></p>
+      <button onclick="accion({k:'presionar'})" class="mt-3 w-full py-6 rounded-2xl bg-poppy font-brand text-2xl font-semibold active:scale-95">Presionar</button></div>`);
+  }
+  if (m.tipo==='colores'){ const obj=m.objetivos[m.hechos];
+    h+=`<p class="mt-3 text-sm font-bold text-whitesand">Colores: ${m.hechos}/${m.objetivos.length} · <span id="t-nivel"></span></p>`;
+    if (tengo('profeta')) h+=caja('Profeta: díctale el color al Fotógrafo', `<div class="flex items-center gap-3"><span class="w-14 h-14 rounded-2xl border-4 border-whitesand shrink-0" style="background:${obj.hex}"></span><p class="font-brand text-3xl font-bold">${obj.es}</p></div>${m.pendiente?`<div class="mt-3"><p class="text-sm">La página no está segura (vio: ${esc(m.pendiente.vio)}). ¿Es correcta?</p><img src="${m.pendiente.thumb}" class="w-40 mx-auto rounded-xl my-2">${siNo()}</div>`:''}`);
+    if (tengo('fotografo')) h+=caja('Fotógrafo/a', `<p class="text-sm">Fotografía de cerca algo del color que diga el Profeta. Avisa al Equilibrista antes de disparar.</p><label class="mt-2 block w-full py-5 rounded-2xl bg-poppy text-center font-brand text-xl font-semibold">📷 Tomar foto<input type="file" accept="image/*" capture="environment" class="hidden" onchange="tomarFotoColor(this)"></label><p id="foto-estado" class="text-sm mt-2">${m.pendiente?'Esperando que el Profeta revise…':''}</p>`);
+    if (tengo('equilibrista')) h+=cajaNivel('Equilibrista: eres el trípode. Nivela cuando el Fotógrafo vaya a disparar');
+    if (!tengo('profeta')&&!tengo('fotografo')&&!tengo('equilibrista')) h+=caja('Apoya al grupo','<p class="text-sm">Busquen juntos objetos del color que pide el Profeta.</p>');
+  }
+  if (m.tipo==='fotos'){ const obj=m.objetivos[m.hechos];
+    h+=`<div class="mt-3"><div class="flex justify-between text-xs font-bold text-whitesand"><span>Tiempo</span><span id="t-tiempo">${m.tiempo} s</span></div><div class="h-3 rounded-full bg-elderberry/70 overflow-hidden"><div id="t-barra" class="h-full bg-poppy transition-all"></div></div><p class="text-xs font-bold text-whitesand mt-1">Fotos: ${m.hechos}/${m.objetivos.length}</p></div>`;
+    if (tengo('profeta')) h+=caja('Profeta: díctale al Fotógrafo', `<p class="text-sm">Busquen y fotografíen <b class="text-lg">${obj.es}</b>.</p>${m.pendiente?`<div class="mt-2"><p class="text-xs">La IA no lo confirmó (vio: ${esc(m.pendiente.vio)||'nada'}). ¿Es correcta la foto?</p><img src="${m.pendiente.thumb}" class="w-40 mx-auto rounded-xl my-2"><div class="flex gap-2"><button onclick="accion({k:'aprobar',ok:true})" class="flex-1 py-2.5 rounded-xl bg-poppy font-bold text-sm">Sí</button><button onclick="accion({k:'aprobar',ok:false})" class="flex-1 py-2.5 rounded-xl bg-whitesand/15 font-bold text-sm">No</button></div></div>`:''}`);
+    if (tengo('fotografo')) h+=caja('Fotógrafo/a', `<p class="text-sm">El Profeta te dirá qué fotografiar.</p><label class="mt-2 block w-full py-5 rounded-2xl bg-poppy text-center font-brand text-xl font-semibold">📷 Tomar foto<input type="file" accept="image/*" capture="environment" class="hidden" onchange="tomarFoto(this)"></label><p id="foto-estado" class="text-xs mt-2">${m.pendiente?'Esperando que el Profeta revise…':''}</p>`);
+    if (tengo('agitador')) h+=caja('Agitador/a: ¡no pares!', `<div data-montar="agitar"><div class="h-3 rounded-full bg-elderberry/70 overflow-hidden"><div id="t-energia" class="h-full bg-whitesand"></div></div><button id="tap" class="holdable mt-3 w-full py-10 rounded-2xl bg-poppy font-brand text-2xl font-semibold transition">¡Toca y agita!</button><p class="text-xs mt-1 text-whitesand/80">Si paras, el tiempo corre 3 veces más rápido.</p></div>`);
+    if (!tengo('profeta')&&!tengo('fotografo')&&!tengo('agitador')) h+=caja('Apoya al grupo','<p class="text-sm">Ayuda a encontrar el objeto que pide el Profeta.</p>');
+  }
+  if (m.tipo==='sonidos'){ const obj=m.objetivos[m.hechos];
+    h+=`<p class="mt-3 text-sm font-bold text-whitesand">Sonidos: ${m.hechos}/${m.objetivos.length}</p>`;
+    h+=caja('Sonido pedido', `<p class="font-brand text-2xl font-bold">${obj}</p><p class="text-sm mt-1">${tengo('profeta')?'Léelo en voz alta. Cuando el Micrófono grabe, todos hacen el sonido.':'Cuando el Micrófono diga "¡ahora!", háganlo todos juntos.'}</p>`);
+    if (tengo('microfono')) h+=caja('Micrófono', `<div data-montar="grabadora"><p class="text-sm">Cuenta "3, 2, 1" en voz alta y presiona. Grabarás 3 segundos.</p><div class="relative mt-2 h-4 rounded-full bg-elderberry/70 overflow-hidden"><div id="t-vol" class="h-full bg-whitesand transition-all"></div><div class="absolute top-0 bottom-0 w-1 bg-poppy" style="left:${UMBRAL_SONIDO}%"></div></div><p class="text-xs mt-1">El sonido tiene que pasar la línea roja.</p><button id="grabar" class="mt-3 w-full py-6 rounded-2xl bg-poppy font-brand text-2xl font-semibold">● Grabar 3 segundos</button><p id="mic-estado" class="text-sm mt-2">${m.pendiente?'Esperando que el Profeta escuche…':''}</p></div>`);
+    if (tengo('profeta')) h+= m.pendiente ? caja('Profeta: escucha y decide', `${m.pendiente.clip?`<audio controls src="${m.pendiente.clip}" class="w-full"></audio>`:'<p class="text-sm">(grabación simulada, sin audio)</p>'}<p class="text-sm my-2">¿Se escucha ${esc(obj)}?</p>${siNo()}`) : caja('Profeta','<p class="text-sm">Espera la grabación del Micrófono.</p>');
+  }
+  if (m.tipo==='brujula'){
+    if (tengo('navegador')) h+=caja('Navegador: encuentra la dirección secreta', m.revelado?`<p class="text-sm">La palabra es:</p><p class="font-brand text-4xl font-bold text-center my-2">${cp.palabra}</p><p class="text-xs">Díctasela al Profeta.</p>`:`<p class="text-xs mb-2">Gira hasta que la flecha apunte hacia arriba y mantén 3 segundos.</p>${widgetBrujula(cp.rumboSecreto,true)}`);
+    if (tengo('profeta')) h+=caja('Profeta', `<p class="text-sm">${cp.pistaProfeta}</p>${m.revelado&&simulado&&esBot(quien('navegador'))?`<p class="mt-2 text-xs">${esc(nombre(quien('navegador')))} te dice: "<b>${cp.palabra}</b>"</p>`:''}<input id="clave" placeholder="palabra clave" class="mt-3 w-full px-4 py-3 rounded-2xl bg-elderberry/60 border border-whitesand/25 uppercase outline-none"><div class="mt-2">${btn('Comprobar',"accion({k:'clave',w:$('clave').value})")}</div>`);
+    if (!tengo('navegador')&&!tengo('profeta')) h+=caja('Apoya al grupo','<p class="text-sm">Ayuda al Navegador a girar con calma y al Profeta a anotar.</p>');
+  }
+  return `<div class="entra min-h-[100dvh] bg-elderberry px-5 pt-4 pb-12 flex flex-col"><div class="my-auto w-full">${cabeceraMision()}${h}</div></div>`; }
+
+function pCierre(){ return tengo('profeta')
+  ? `<div class="entra min-h-[100dvh] bg-elderberry px-5 pt-10 text-whitesand"><div class="bg-wine rounded-[28px] p-5 border border-whitesand/25"><p class="text-xs font-bold uppercase text-poppy">Lee en voz alta · cierre</p><p class="mt-2 text-lg leading-relaxed">${ruta().cierre}</p></div><div class="mt-5">${btn('Terminar la ruta ✓',"accion({k:'terminar'})")}</div></div>`
+  : `<div class="entra min-h-[100dvh] bg-elderberry px-6 flex flex-col justify-center text-center text-whitesand">${avatar('profeta','w-24 h-24 mx-auto')}<h1 class="text-3xl font-bold mt-4">¡Llegaron!</h1><p class="mt-2 text-sm">Escuchen al Profeta: va a cerrar la historia.</p></div>`; }
+
+function pFinal(){ const st=S.stats, min=Math.max(1,Math.round((st.fin-st.inicio)/60000)), d=new Date(st.fin), fila=(a,b)=>`<div class="flex justify-between text-xs py-1 border-b border-whitesand/10"><span class="text-whitesand/85">${a}</span><b>${b}</b></div>`;
+  return `<div class="entra min-h-[100dvh] bg-elderberry px-5 pt-6 pb-12 text-whitesand">
+  <div class="bg-wine rounded-[32px] p-5 text-center border-2 border-whitesand/30"><div class="flota w-16 h-16 mx-auto rounded-full bg-poppy flex items-center justify-center text-3xl">✦</div>
+    <h1 class="text-3xl font-bold mt-2">¡Ruta completada!</h1><p class="text-xs mt-1">${ruta().nombre} · ${S.jugadores.length} personas</p>
+    <div class="mt-4 bg-elderberry/70 rounded-2xl p-3 text-left">${fila('Tiempo total',min+' min')}${fila('Errores',st.errores)}${fila('Ayudas pedidas',st.ayudas)}${fila('Día',d.toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'}))}${fila('Hora',d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}))}${fila('Clima',st.clima||'—')}</div>
+    <div class="mt-3 bg-elderberry/70 rounded-2xl p-3 text-left"><p class="text-xs font-bold uppercase text-poppy mb-1">Equipo y roles</p>${S.jugadores.map(j=>fila(esc(j.nombre),chipRoles(j.id))).join('')}</div>
+    <div class="mt-3 bg-elderberry/70 rounded-2xl p-3 text-left"><p class="text-xs font-bold uppercase text-poppy mb-1">Misiones</p>${st.misiones.map(x=>fila(MISIONES[x.tipo].titulo, Math.round(x.seg/60*10)/10+' min · '+x.errores+' err.')).join('')}</div>
+    <div class="mt-4 bg-whitesand text-elderberry rounded-2xl p-4">${IMG_OK['sello-postal']?png('sello-postal','mx-auto max-h-24'):'<p class="text-2xl">🎨</p>'}<p class="font-bold">Su postal dibujada a mano los espera</p><p class="text-xs">Muestren esta pantalla para recibirla.</p></div>
+    ${soyAnfitrion?`<div class="mt-4">${btn('▶ Ver la pieza audiovisual del grupo','verPieza()')}</div><p class="text-xs mt-1 text-whitesand/75">${MEDIA.length} recuerdos capturados</p>`:`<p class="mt-4 text-xs">La pieza audiovisual se reproduce en el celular del Profeta.</p>`}
+    <button onclick="salirSala()" class="mt-4 w-full py-2.5 rounded-2xl bg-ashwagandha/80 text-xs font-bold">Volver al inicio</button></div></div>`; }
+
+/* Pieza audiovisual: presentación con los dibujos, fotos y audios del recorrido */
+function verPieza(){ const imgs=MEDIA.filter(x=>x.tipo==='img'), auds=MEDIA.filter(x=>x.tipo==='audio');
+  const ov=document.createElement('div'); ov.className='fixed inset-0 z-50 bg-elderberry flex flex-col items-center justify-center text-whitesand p-6 text-center'; document.body.appendChild(ov);
+  const diapos=[{t:'Tupahue',s:ruta().nombre+' · '+new Date().toLocaleDateString('es-CL')}, ...imgs.map(i=>({img:i.src,s:i.txt})), {t:'Juntos',s:S.jugadores.map(j=>j.nombre).join(' · ')}];
+  let i=0, a=0; const audio=new Audio(); const sig=()=>{ if(a<auds.length){ audio.src=auds[a++].src; audio.play().catch(()=>{}); } }; audio.onended=sig; sig();
+  const paso=()=>{ if(i>=diapos.length){ ov.remove(); audio.pause(); return; } const d=diapos[i++];
+    ov.innerHTML = d.img ? `<img src="${d.img}" class="max-h-[65vh] rounded-3xl shadow-2xl entra"><p class="mt-3 font-bold">${esc(d.s)}</p>` : `<h1 class="text-5xl font-bold entra">${d.t}</h1><p class="mt-2">${esc(d.s)}</p>`;
+    ov.insertAdjacentHTML('beforeend','<p class="absolute bottom-6 text-xs opacity-60">toca para cerrar</p>'); setTimeout(paso, 2600); };
+  ov.onclick=()=>{ i=diapos.length; }; paso(); }
+
+/* ==========================================================================
+   10. BOTONES DE INICIO Y SALAS
+   ========================================================================== */
+function registrar(){ const n=$('r-n').value.trim(), c=$('r-c').value.trim();
+  if(!n||!c.includes('@')||!$('r-e').checked) return toast('Completa nombre, un correo válido y confirma que eres mayor de edad.','error');
+  perfil={nombre:n,correo:c}; store.set('perfil',perfil); vista='inicio'; render(); }
+function salirPerfil(){ perfil=null; store.set('perfil',null); vista='registro'; render(); }
+const codigoAzar=()=>Array.from({length:4},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random()*24)]).join('');
+function crearSala(sim){ const cod=codigoAzar(); soyAnfitrion=true; sala=cod;
+  const iniciar=()=>{ S=nuevaSala(cod); store.set('sala',{cod,host:true}); prev=JSON.parse(JSON.stringify(S)); render(); };
+  if (sim){ simulado=true; red('modo simulado'); iniciar(); procesar(miId,{k:'bot+'}); procesar(miId,{k:'bot+'}); return; }
+  conectar(cod, ok=>{ if(ok) iniciar(); else { soyAnfitrion=false; sala=null; toast('No se pudo conectar. Prueba el modo con jugadores simulados.','error'); } }); }
+function unirse(cod){ cod=(cod||$('u-c').value).trim().toUpperCase(); if(cod.length!==4) return toast('El código tiene 4 letras.','error');
+  soyAnfitrion=false; sala=cod; conectar(cod, ok=>{ if(!ok) return toast('No se pudo conectar a la sala.','error'); store.set('sala',{cod,host:false}); enviar({t:'unirse',id:miId,nombre:perfil.nombre}); red('esperando al Profeta…'); }); }
+function salirSala(){ store.set('sala',null); location.href=location.pathname; }
+
+// Si la página se abrió desde un sticker NFC (?nfc=N): volver a la sala y registrar el toque
+if (nfcURL){ const g=store.get('sala');
+  if (perfil && g && !g.host){ vista='inicio'; unirse(g.cod); toast('Leyendo NFC '+nfcURL+'…');
+    const iv=setInterval(()=>{ if(S && S.fase==='camino'){ accion({k:'nfc',n:nfcURL}); clearInterval(iv); history.replaceState(null,'',location.pathname); } },1200); setTimeout(()=>clearInterval(iv),30000); }
+  else setTimeout(()=>toast('¡Encontraste un punto de Tupahue! Crea una sala con tu grupo para jugar.'),700); }
+// Si el NFC abrió una pestaña nueva (iPhone), la pestaña antigua queda en pausa para no tener varias jugando
+let pausada=false;
+try{ const bc=new BroadcastChannel('tupahue');
+  bc.onmessage=e=>{ const d=e.data; if(d.id!==miId || d.tab===TAB) return;
+    if (d.t==='hola' && !soyAnfitrion){ pausada=true; net=null; sala=null; $('app').innerHTML=`<div class="min-h-[100dvh] bg-grass px-6 flex flex-col justify-center text-center text-whitesand"><h1 class="text-3xl font-bold">El juego siguió en otra pestaña</h1><p class="mt-2">Ya puedes cerrar esta pestaña.</p></div>`; }
+    if (d.t==='hola' && soyAnfitrion) bc.postMessage({t:'soyProfeta', id:miId, tab:TAB});
+    if (d.t==='soyProfeta') { $('app').innerHTML=`<div class="min-h-[100dvh] bg-grass px-6 flex flex-col justify-center text-center text-whitesand"><h1 class="text-3xl font-bold">Vuelve a tu pestaña anterior</h1><p class="mt-2">Ahí está tu sala como Profeta. Cierra esta pestaña.</p></div>`; }
+  };
+  if (nfcURL) bc.postMessage({t:'hola', id:miId, tab:TAB});
+}catch(e){}
+render();
+</script>
+</body>
+</html>

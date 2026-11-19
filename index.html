@@ -145,19 +145,17 @@ let net=null, sala=null, soyAnfitrion=false, simulado=false, S=null, vista='bien
 const MEDIA = [];   // fotos, dibujos y audios para la pieza audiovisual (en el anfitrión)
 
 function conectar(codigo, cb){
-  red('conectando…'); let i=0, listo=false;
-  const intentar=()=>{
-    if (typeof mqtt==='undefined' || i>=BROKERS.length){ red('sin conexión'); return cb(false); }
-    const cli = mqtt.connect(BROKERS[i++], { clientId:'tup_'+miId+'_'+Math.random().toString(36).slice(2,5), connectTimeout:5000, reconnectPeriod:2000 });
-    const t = setTimeout(()=>{ if(!listo){ try{cli.end(true)}catch(e){} intentar(); } }, 6500);
-    cli.on('connect', ()=>{ if(listo) return; listo=true; clearTimeout(t);
-      const topico='tupahue/v4/'+codigo; cli.subscribe(topico);
-      net={ enviar:m=>cli.publish(topico, JSON.stringify(m)) };
-      cli.on('message',(_,b)=>{ try{ recibir(JSON.parse(b.toString())) }catch(e){} });
-      red('en línea · sala '+codigo); cb(true); });
-    cli.on('error',()=>{});
-  };
-  intentar();
+  // Se conecta a los 2 servidores al mismo tiempo y envía por ambos.
+  // Así dos celulares nunca quedan en servidores distintos (eso causaba que no se encontraran).
+  red('conectando…'); const topico='tupahue/v5/'+codigo, vistos=new Set(), clis=[]; let fin=false;
+  if (typeof mqtt==='undefined'){ red('sin conexión'); return cb(false); }
+  BROKERS.forEach(url=>{ const cli=mqtt.connect(url,{ clientId:'tup_'+miId+'_'+Math.random().toString(36).slice(2,6), connectTimeout:8000, reconnectPeriod:2000 });
+    clis.push(cli);
+    cli.on('connect',()=>{ cli.subscribe(topico); red('en línea · sala '+codigo); if(!fin){ fin=true; clearTimeout(t); cb(true); } });
+    cli.on('message',(_,b)=>{ try{ const m=JSON.parse(b.toString()); if(m.mid){ if(vistos.has(m.mid)) return; vistos.add(m.mid); if(vistos.size>800) vistos.clear(); } recibir(m); }catch(e){} });
+    cli.on('error',()=>{}); });
+  net={ enviar:m=>{ m.mid=Math.random().toString(36).slice(2,10); const txt=JSON.stringify(m); clis.forEach(c=>{ if(c.connected) c.publish(topico,txt); }); } };
+  const t=setTimeout(()=>{ if(!fin){ fin=true; red('sin conexión'); clis.forEach(c=>{try{c.end(true)}catch(e){}}); cb(false); } },10000);
 }
 function enviar(m){ if(!simulado && net) net.enviar(m); }
 function recibir(m){ if (typeof pausada!=='undefined' && pausada) return;
@@ -284,7 +282,7 @@ function buscarClima(){ if (typeof fetch!=='function') return;
       S.stats.clima = txt+', '+t+'°C'; cambio(); }).catch(()=>{});
 }
 let prev=null;
-function cambio(){ publicar(); avisos(prev,S); prev=JSON.parse(JSON.stringify(S)); render(); }
+function cambio(){ if(soyAnfitrion && !simulado) store.set('host',{S,t:Date.now()}); publicar(); avisos(prev,S); prev=JSON.parse(JSON.stringify(S)); render(); }
 
 /* ==========================================================================
    6. JUGADORES SIMULADOS (probar sin otros celulares)
@@ -504,7 +502,7 @@ function pInicio(){ const op=(ico,t,s,on)=>`<button onclick="${on}" class="w-ful
   <div class="relative h-[170px] px-5 pt-4 text-center overflow-hidden">${PICO}
     <div class="relative z-10 flex justify-end"><span class="px-2.5 py-0.5 rounded-full bg-elderberry/75 text-whitesand text-xs font-bold">Hola, ${esc(perfil.nombre)}</span></div>
     <div class="relative z-10 mt-3"><h1 class="text-[44px] leading-none font-bold text-whitesand drop-shadow">Tupahue</h1><p class="font-brand text-sm font-semibold text-whitesand bg-elderberry/70 inline-block px-3.5 py-0.5 rounded-full mt-1">Juega en grupo</p></div></div>
-  <div class="px-5 space-y-2.5">${op('✦','Crear sala','Serás el Profeta del grupo',"crearSala(false)")}${op('#','Unirse con código','Únete a la sala de un compañero',"vista='unirse';render()")}${op('⚡','Probar con jugadores simulados','Para practicar sin otros celulares',"crearSala(true)")}</div>
+  <div class="px-5 space-y-2.5">${salaGuardada()?op('↺','Volver a la sala '+salaGuardada().cod, salaGuardada().host?'Retoma tu sala como Profeta':'Vuelve a la sala de tu grupo',"volverSala()"):''}${op('✦','Crear sala','Serás el Profeta del grupo',"crearSala(false)")}${op('#','Unirse con código','Únete a la sala de un compañero',"vista='unirse';render()")}${op('⚡','Probar con jugadores simulados','Para practicar sin otros celulares',"crearSala(true)")}</div>
   <div class="mt-5 px-5"><h2 class="font-bold uppercase tracking-wider text-whitesand mb-2">Rutas</h2>
     <div class="flex gap-3 overflow-x-auto no-scroll pb-2 snap-x">${RUTAS.map(cardRuta).join('')}</div>
     <p class="text-center mt-4"><button onclick="salirPerfil()" class="text-xs font-bold text-whitesand/70 underline">no soy ${esc(perfil.nombre)}</button></p></div></div>`; }
@@ -658,9 +656,14 @@ function crearSala(sim){ const cod=codigoAzar(); soyAnfitrion=true; sala=cod;
   const iniciar=()=>{ S=nuevaSala(cod); store.set('sala',{cod,host:true}); prev=JSON.parse(JSON.stringify(S)); render(); };
   if (sim){ simulado=true; red('modo simulado'); iniciar(); procesar(miId,{k:'bot+'}); procesar(miId,{k:'bot+'}); return; }
   conectar(cod, ok=>{ if(ok) iniciar(); else { soyAnfitrion=false; sala=null; toast('No se pudo conectar. Prueba el modo con jugadores simulados.','error'); } }); }
+function volverSala(){ const g=store.get('sala'), h=store.get('host');
+  if (g && g.host && h){ soyAnfitrion=true; sala=g.cod; conectar(g.cod, ok=>{ if(!ok) return toast('No se pudo conectar.','error'); S=h.S; prev=JSON.parse(JSON.stringify(S)); render(true); publicar(); }); }
+  else if (g) unirse(g.cod); }
+function salaGuardada(){ const g=store.get('sala'), h=store.get('host'); if(!g) return null;
+  if (g.host && !(h && Date.now()-h.t < 3*3600e3)) return null; return g; }
 function unirse(cod){ cod=(cod||$('u-c').value).trim().toUpperCase(); if(cod.length!==4) return toast('El código tiene 4 letras.','error');
-  soyAnfitrion=false; sala=cod; conectar(cod, ok=>{ if(!ok) return toast('No se pudo conectar a la sala.','error'); store.set('sala',{cod,host:false}); enviar({t:'unirse',id:miId,nombre:perfil.nombre}); red('esperando al Profeta…'); }); }
-function salirSala(){ store.set('sala',null); location.href=location.pathname; }
+  soyAnfitrion=false; sala=cod; conectar(cod, ok=>{ if(!ok) return toast('No se pudo conectar a la sala.','error'); store.set('sala',{cod,host:false}); enviar({t:'unirse',id:miId,nombre:perfil.nombre}); red('esperando al Profeta…'); toast('Conectado. Entrando a la sala '+cod+'…'); }); }
+function salirSala(){ store.set('sala',null); store.set('host',null); location.href=location.pathname; }
 
 // Si la página se abrió desde un sticker NFC (?nfc=N): volver a la sala y registrar el toque
 if (nfcURL){ const g=store.get('sala');
