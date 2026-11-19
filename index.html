@@ -555,7 +555,8 @@ function mapaSVG(){ const n=ruta().checkpoints.length;
     ${arbol(55,70,1.1)}${arbol(310,80,1.1)}${arbol(320,200,1)}${arbol(45,240,1.1)}${arbol(285,290,1)}${arbol(60,300,.9)}${arbol(250,170,.8)}</svg>
     ${ruta().checkpoints.map((c,i)=>{ const hecho=i<S.cp, act=i===S.cp; return `<div style="left:${POS[i][0]}%;top:${POS[i][1]}%" class="absolute -translate-x-1/2 -translate-y-1/2 text-center">
       <div class="relative inline-flex ${act?'late':''}"><span class="relative z-10 w-9 h-9 rounded-full flex items-center justify-center font-brand font-bold text-sm border-2 border-whitesand shadow-lg ${hecho?'bg-ashwagandha':act?'bg-poppy':'bg-elderberry'} text-whitesand">${hecho?'✓':i+1}</span></div>
-      <span class="block mt-0.5 px-1.5 py-0.5 rounded-lg bg-elderberry/90 text-whitesand text-xs font-bold whitespace-nowrap">${c.lugar}</span></div>`; }).join('')}</div>`; }
+      ${hecho ? `<span class="block mt-0.5 px-1.5 py-0.5 rounded-lg bg-elderberry/90 text-whitesand text-xs font-bold whitespace-nowrap">${c.lugar}</span>` : ''}</div>`; }).join('')}</div>`; }
+
 
 function widgetBrujula(rumbo, mision){ return `<div data-montar="brujula" data-rumbo="${rumbo}" data-mision="${mision?1:0}" class="text-center">
   <div id="anillo" class="relative mx-auto w-40 h-40 rounded-full bg-elderberry border-4 border-whitesand flex items-center justify-center">
