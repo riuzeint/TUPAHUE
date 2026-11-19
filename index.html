@@ -133,6 +133,7 @@ const store = { get(k){ try{ return JSON.parse(localStorage.getItem('tup_'+k)) }
                 set(k,v){ try{ localStorage.setItem('tup_'+k, JSON.stringify(v)) }catch(e){} } };
 let perfil = store.get('perfil');
 const miId = store.get('id') || ('p'+Math.random().toString(36).slice(2,8)); store.set('id', miId);
+const TAB = Math.random().toString(36).slice(2);
 const nfcURL = parseInt(new URLSearchParams(location.search).get('nfc')) || null;   // ?nfc=3 al acercar un sticker
 
 /* ==========================================================================
@@ -159,7 +160,7 @@ function conectar(codigo, cb){
   intentar();
 }
 function enviar(m){ if(!simulado && net) net.enviar(m); }
-function recibir(m){
+function recibir(m){ if (typeof pausada!=='undefined' && pausada) return;
   if (m.t==='estado' && !soyAnfitrion){ const j=JSON.stringify(m.s); if(j===ultimoJSON) return; ultimoJSON=j; const a=S; S=m.s; avisos(a,S); render(); }
   if (soyAnfitrion && m.t==='unirse') agregar(m.id, m.nombre);
   if (soyAnfitrion && m.t==='accion') procesar(m.id, m.a);
@@ -339,7 +340,7 @@ let sensoresOK=false;
 async function pedirSensores(){
   try{ if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) await DeviceOrientationEvent.requestPermission(); }catch(e){}
   try{ if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) await DeviceMotionEvent.requestPermission(); }catch(e){}
-  sensoresOK=true; toast('Sensores activados'); render(true);
+  sensoresOK=true; leerNFC(true); toast('Sensores activados'); render(true);
 }
 function escucharOrientacion(fn){ const h=e=>fn(e); addEventListener('deviceorientation',h); addEventListener('deviceorientationabsolute',h); alLimpiar(()=>{ removeEventListener('deviceorientation',h); removeEventListener('deviceorientationabsolute',h); }); }
 function rumboDe(e){ if (e.webkitCompassHeading!=null) return e.webkitCompassHeading; if (e.absolute && e.alpha!=null) return (360-e.alpha)%360; return null; }
@@ -429,10 +430,16 @@ function tomarFotoColor(inp){ const f=inp.files[0]; if(!f) return; const st=$('f
     img.src=r.result; }; r.readAsDataURL(f); inp.value=''; }
 function hsl(r,g,b){ r/=255; g/=255; b/=255; const mx=Math.max(r,g,b), mn=Math.min(r,g,b), l=(mx+mn)/2; if(mx===mn) return [0,0,l];
   const d=mx-mn, s=l>.5?d/(2-mx-mn):d/(mx+mn); const h = mx===r?(g-b)/d+(g<b?6:0) : mx===g?(b-r)/d+2 : (r-g)/d+4; return [h*60,s,l]; }
-// NFC dentro de la página (solo Chrome en Android)
-async function leerNFC(){ try{ const r=new NDEFReader(); await r.scan(); toast('Acerca el celular al sticker…');
-  r.onreading=e=>{ for(const rec of e.message.records){ try{ const n=parseInt(((new TextDecoder().decode(rec.data)).match(/nfc=(\d+)/)||[])[1]); if(n){ accion({k:'nfc',n}); return; } }catch(x){} } toast('Ese sticker no es de Tupahue.','error'); };
-  }catch(e){ toast('No se pudo activar el NFC: '+e.message,'error'); } }
+// NFC dentro de la página (Chrome en Android). Mientras está activo, Android NO abre pestañas nuevas:
+// la lectura llega directo al juego. Se activa una vez (con "Activar sensores") y queda encendido.
+let nfcActivo=false;
+async function leerNFC(silencioso){ if(!('NDEFReader' in window) || nfcActivo) return;
+  try{ const r=new NDEFReader(); await r.scan(); nfcActivo=true; if(!silencioso) toast('NFC activado: cuando te toque, solo acerca el celular al sticker.');
+    r.onreading=e=>{ let n=null; for(const rec of e.message.records){ try{ n=n||parseInt(((new TextDecoder().decode(rec.data)).match(/nfc=(\d+)/)||[])[1]); }catch(x){} }
+      if(!n) return toast('Ese sticker no es de Tupahue.','error');
+      if(S && S.fase==='camino') accion({k:'nfc',n}); else toast('Todavía no es momento de tocar un NFC.','error'); };
+    render(true);
+  }catch(e){ if(!silencioso) toast('No se pudo activar el NFC: '+e.message,'error'); } }
 function grabar(stream){ try{ const rec=new MediaRecorder(stream,{audioBitsPerSecond:24000}), partes=[];
   rec.ondataavailable=e=>partes.push(e.data); rec.onstop=()=>{ const b=new Blob(partes,{type:rec.mimeType}); if(b.size>150000) return; const fr=new FileReader(); fr.onload=()=>accion({k:'audio',clip:fr.result}); fr.readAsDataURL(b); };
   rec.start(); setTimeout(()=>rec.state!=='inactive'&&rec.stop(), 5000); }catch(e){} }
@@ -538,7 +545,7 @@ function pRoles(){ const prof=quien('profeta')===miId;
 function pRevelar(){ const mis=misRoles(), prof=tengo('profeta');
   return `<div class="entra min-h-[100dvh] bg-grass px-5 py-10 flex flex-col justify-center text-whitesand"><p class="text-center text-xs font-bold uppercase tracking-widest text-whitesand/80">Tu rol</p>
   ${mis.map(r=>`<div class="mt-3 p-4 rounded-[26px] bg-poppy border-2 border-whitesand flex items-center gap-3 shadow-lg">${avatar(r,'w-16 h-16')}<div><h2 class="text-xl font-bold">${ROLES[r].nombre}</h2><span class="text-xs font-bold px-2 py-0.5 rounded-full bg-elderberry">${ROLES[r].habilidad}</span><p class="text-xs mt-1">${ROLES[r].desc}</p></div></div>`).join('')}
-  ${!sensoresOK?`<div class="mt-4">${btn('Activar sensores del celular','pedirSensores()','bg-elderberry')}<p class="text-xs text-center mt-1 text-whitesand/75">Necesario en iPhone para brújula, giroscopio y movimiento.</p></div>`:''}
+  ${!sensoresOK?`<div class="mt-4">${btn('Activar sensores del celular','pedirSensores()','bg-elderberry')}<p class="text-xs text-center mt-1 text-whitesand/75">Necesario en iPhone para brújula, giroscopio y movimiento. En Android también activa el NFC (así no se abren pestañas nuevas).</p></div>`:''}
   ${prof?`<div class="mt-5 bg-elderberry rounded-[26px] p-4 border border-whitesand/20"><p class="text-xs font-bold uppercase tracking-wider text-poppy">Lee en voz alta</p><p class="mt-1 text-base leading-relaxed">${ruta().intro}</p></div><div class="mt-4">${btn('Comenzar el recorrido →',"accion({k:'iniciar'})")}</div>`
         :`<p class="mt-6 text-center text-sm font-bold">Escucha al Profeta: va a contar la historia de la ruta.</p>`}</div>`; }
 
@@ -569,7 +576,7 @@ function pCamino(){ const cp=cpAct(), prof=tengo('profeta'), nav=tengo('navegado
           :`<p class="text-sm">Pregúntale al Profeta (<b>${esc(nombre(quien('profeta')))}</b>) por la pista.</p>`}
     ${nav?`<div class="bg-elderberry/60 rounded-2xl p-3"><p class="text-xs font-bold uppercase text-poppy mb-1">Tu brújula: dirección general</p>${widgetBrujula(cp.rumbo,false)}</div>`:''}
     <div class="rounded-2xl p-3 ${meToca?'bg-poppy':'bg-wine/60'}"><p class="text-sm font-bold">${meToca?'¡Te toca a ti! Al llegar, acerca tu celular al NFC '+cp.nfc+'.':'Al llegar, el NFC lo debe tocar: '+esc(nombre(S.nfcTurno))}</p>
-      ${meToca?`${'NDEFReader' in window?`<button onclick="leerNFC()" class="mt-2 w-full py-3 rounded-xl bg-elderberry text-whitesand font-bold">((·)) Escanear NFC (Android)</button>`:''}<button onclick="accion({k:'nfc',n:${cp.nfc}})" class="mt-2 w-full py-2.5 rounded-xl bg-whitesand/15 text-whitesand text-sm font-bold">Simular NFC ${cp.nfc} (prueba)</button>`:''}</div>
+      ${'NDEFReader' in window?(nfcActivo?`<p class="text-xs mt-1">✓ NFC activo en este celular</p>`:`<button onclick="leerNFC()" class="mt-2 w-full py-3 rounded-xl bg-elderberry text-whitesand font-bold">((·)) Activar NFC (Android)</button>`):''}${meToca?`<button onclick="accion({k:'nfc',n:${cp.nfc}})" class="mt-2 w-full py-2.5 rounded-xl bg-whitesand/15 text-whitesand text-sm font-bold">Simular NFC ${cp.nfc} (prueba)</button>`:''}</div>
     ${prof&&!S.ayuda?`<button onclick="accion({k:'ayuda'})" class="w-full py-2 rounded-xl bg-whitesand/15 text-xs font-bold">Pedir ayuda (cuenta en las estadísticas)</button>`:''}</div></div>`; }
 
 function cabeceraMision(){ const m=S.mision, cp=cpAct(); return `<div class="flex justify-between items-center"><span class="px-3 py-1 rounded-full bg-wine text-whitesand text-xs font-bold">Punto ${S.cp+1} · ${cp.lugar}</span><span class="text-xs font-bold text-whitesand/80">${chipRoles(miId)}</span></div>
@@ -660,6 +667,16 @@ if (nfcURL){ const g=store.get('sala');
   if (perfil && g && !g.host){ vista='inicio'; unirse(g.cod); toast('Leyendo NFC '+nfcURL+'…');
     const iv=setInterval(()=>{ if(S && S.fase==='camino'){ accion({k:'nfc',n:nfcURL}); clearInterval(iv); history.replaceState(null,'',location.pathname); } },1200); setTimeout(()=>clearInterval(iv),30000); }
   else setTimeout(()=>toast('¡Encontraste un punto de Tupahue! Crea una sala con tu grupo para jugar.'),700); }
+// Si el NFC abrió una pestaña nueva (iPhone), la pestaña antigua queda en pausa para no tener varias jugando
+let pausada=false;
+try{ const bc=new BroadcastChannel('tupahue');
+  bc.onmessage=e=>{ const d=e.data; if(d.id!==miId || d.tab===TAB) return;
+    if (d.t==='hola' && !soyAnfitrion){ pausada=true; net=null; sala=null; $('app').innerHTML=`<div class="min-h-[100dvh] bg-grass px-6 flex flex-col justify-center text-center text-whitesand"><h1 class="text-3xl font-bold">El juego siguió en otra pestaña</h1><p class="mt-2">Ya puedes cerrar esta pestaña.</p></div>`; }
+    if (d.t==='hola' && soyAnfitrion) bc.postMessage({t:'soyProfeta', id:miId, tab:TAB});
+    if (d.t==='soyProfeta') { $('app').innerHTML=`<div class="min-h-[100dvh] bg-grass px-6 flex flex-col justify-center text-center text-whitesand"><h1 class="text-3xl font-bold">Vuelve a tu pestaña anterior</h1><p class="mt-2">Ahí está tu sala como Profeta. Cierra esta pestaña.</p></div>`; }
+  };
+  if (nfcURL) bc.postMessage({t:'hola', id:miId, tab:TAB});
+}catch(e){}
 render();
 </script>
 </body>
