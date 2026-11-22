@@ -179,7 +179,7 @@ const quien = rol => S.roles && S.roles[rol];
 const misRoles = (id=miId) => S && S.roles ? ORDEN_ROLES.filter(r=>S.roles[r]===id) : [];
 const tengo = rol => misRoles().includes(rol);
 
-function nuevaSala(cod){ return { codigo:cod, fase:'lobby', ruta:'taller', cp:0, jugadores:[{id:miId,nombre:perfil.nombre}],
+function nuevaSala(cod){ return { codigo:cod, fase:'lobby', ruta:null, cp:0, jugadores:[{id:miId,nombre:perfil.nombre}],
   roles:null, nfcTurno:null, mision:null, ayuda:false, aviso:null, avisoN:0, celebrar:0,
   stats:{ inicio:null, fin:null, errores:0, ayudas:0, misiones:[], clima:null } }; }
 function agregar(id,nom){ if(S.fase!=='lobby' || S.jugadores.length>=6 || S.jugadores.some(j=>j.id===id)) return; S.jugadores.push({id,nombre:nom}); cambio(); }
@@ -190,6 +190,7 @@ function asignarRoles(){
   S.roles={}; ORDEN_ROLES.forEach((r,i)=>S.roles[r]=lista[i%lista.length]);
 }
 function elegirNFC(){ // al azar; si hay 2+ personas, nunca el Profeta (en iPhone el NFC abre otra pestaña)
+  S.pase=null;
   const ids=S.jugadores.map(j=>j.id), op = ids.length>1 ? ids.filter(i=>i!==quien('profeta')) : ids;
   S.nfcTurno = op[Math.floor(Math.random()*op.length)];
 }
@@ -218,17 +219,40 @@ function procesar(id, a){
     case 'ruta': if(id===S.jugadores[0].id && RUTAS.find(r=>r.id===a.ruta&&r.activa)) S.ruta=a.ruta; break;
     case 'bot+': if(simulado && S.jugadores.length<6){ const n=['Vale','Tomás','Sofi','Benja','Isi']; const k=S.jugadores.length; S.jugadores.push({id:'bot'+k,nombre:n[k-1]+' (sim)'}); } break;
     case 'bot-': if(simulado && S.jugadores.length>2) S.jugadores.pop(); break;
-    case 'comenzar': if(S.jugadores.length>=2){ asignarRoles(); S.fase='roles'; } break;
+    case 'comenzar': if(S.ruta && S.jugadores.length>=2){ asignarRoles(); S.fase='roles'; } break;
     // --- roles e historia (solo el Profeta) ---
     case 'rolesListos': if(id===quien('profeta')) S.fase='revelar'; break;
     case 'iniciar': if(id===quien('profeta')){ S.fase='camino'; S.cp=0; S.stats.inicio=Date.now(); elegirNFC(); } break;
     case 'ayuda': S.ayuda=true; S.stats.ayudas++; break;
+    // --- pasar el turno del NFC a otro jugador (lo puede pedir quien tiene el turno o el Profeta) ---
+    case 'pasarNFC': {
+      if (S.fase!=='camino' || (id!==S.nfcTurno && id!==quien('profeta'))) return;
+      if (S.pase) return;   // ya hay una solicitud abierta
+      const ids=S.jugadores.map(j=>j.id), actual=S.nfcTurno;
+      const otros=ids.filter(i=>i!==actual);
+      if (!otros.length) return;
+      const sinProfeta=otros.filter(i=>i!==quien('profeta'));   // preferimos no pasarle el NFC al Profeta
+      const lista=sinProfeta.length?sinProfeta:otros;
+      // siguiente en orden de la sala, después del que tenía el turno
+      const despues=ids.slice(ids.indexOf(actual)+1).concat(ids.slice(0,ids.indexOf(actual))).find(i=>lista.includes(i)) || lista[0];
+      // se abre una votación: todos los jugadores deben aprobar (quien la pide ya aprueba)
+      S.pase={ por:id, de:actual, a:despues, ok:[id] };
+      aviso(nombre(id)+' pide pasar el turno del NFC de '+nombre(actual)+' a '+nombre(despues)+'. Todos deben aprobar.');
+      if (S.pase.ok.length>=ids.length) aplicarPase();
+      break; }
+    case 'votarPase': {
+      if (S.fase!=='camino' || !S.pase || S.pase.ok.includes(id)) return;
+      if (!a.ok){ aviso(nombre(id)+' rechazó el cambio de NFC. Se queda '+nombre(S.pase.de)+'.'); S.pase=null; break; }
+      S.pase.ok.push(id);
+      if (S.jugadores.every(j=>S.pase.ok.includes(j.id))) aplicarPase();
+      break; }
+    case 'cancelarPase': if(S.pase && (id===S.pase.por || id===quien('profeta'))) S.pase=null; break;
     // --- NFC ---
     case 'nfc':
       if (S.fase!=='camino') return;
       if (a.n!==cp.nfc) { aviso('Ese NFC no es el de este punto. Busquen el '+cp.nfc+'.'); break; }
       if (id!==S.nfcTurno) { aviso('¡No! Le toca a '+nombre(S.nfcTurno)+' acercar su celular.'); break; }
-      S.ayuda=false;
+      S.ayuda=false; S.pase=null;
       if (cp.final) S.fase='cierre'; else { S.fase='mision'; S.mision=prepararMision(cp); }
       break;
     // --- misión 1: equilibrio en orden ---
@@ -271,6 +295,8 @@ function procesar(id, a){
   }
   cambio();
 }
+function aplicarPase(){ const p=S.pase; if(!p) return; S.nfcTurno=p.a; S.pase=null;
+  aviso('Todos aprobaron: ahora le toca a '+nombre(p.a)+' acercar su celular al NFC.'); }
 function completar(){
   const m=S.mision; S.stats.misiones.push({ tipo:m.tipo, seg:Math.round((Date.now()-m.inicio)/1000), errores:m.errores });
   S.mision=null; S.cp++; S.fase='camino'; S.ayuda=false; S.aviso=null; S.celebrar=Date.now(); elegirNFC(); cambio();
@@ -292,6 +318,7 @@ function tras(clave, ms, fn){ const k=clave+'|'+S.cp+'|'+S.fase; if(!B[k]) B[k]=
 const esBot = id => id && id.startsWith('bot');
 setInterval(()=>{
   if (!simulado || !S) return; const m=S.mision, cp=S.fase!=='lobby'?cpAct():null;
+  if (S.fase==='camino' && S.pase){ const b=S.jugadores.find(j=>esBot(j.id) && !S.pase.ok.includes(j.id)); if(b) return procesar(b.id,{k:'votarPase',ok:true}); }   // los bots aprueban
   if (S.fase==='camino' && esBot(S.nfcTurno)) tras('nfc', 3000, ()=>procesar(S.nfcTurno,{k:'nfc',n:cp.nfc}));
   if (S.fase!=='mision' || !m) return;
   if (m.tipo==='equilibrio'){
@@ -455,7 +482,7 @@ const chipRoles=id=>misRoles(id).map(r=>ROLES[r].nombre).join(' + ');
 
 let ultimaClave='';
 function clave(){ if(!S) return 'L|'+vista+'|'+!!perfil; const m=S.mision;
-  return [S.fase,S.cp,S.nfcTurno,S.ruta,S.jugadores.length,S.ayuda,sensoresOK, m&&m.tipo, m&&m.paso!==undefined&&m.tipo==='dibujo'?m.paso:'', m&&m.revelado, m&&m.etapa, m&&m.hechos, m&&!!m.pendiente].join('|'); }
+  return [S.fase,S.cp,S.nfcTurno,S.pase?S.pase.ok.join(','):'-',S.ruta,S.jugadores.length,S.ayuda,sensoresOK, m&&m.tipo, m&&m.paso!==undefined&&m.tipo==='dibujo'?m.paso:'', m&&m.revelado, m&&m.etapa, m&&m.hechos, m&&!!m.pendiente].join('|'); }
 function render(forzar){ const k=clave(); if(forzar||k!==ultimaClave){ limpiar(); $('app').innerHTML=pantalla(); ultimaClave=k;
     document.querySelectorAll('[data-montar]').forEach(el=>MONTAJES[el.dataset.montar](el)); window.scrollTo(0,0); }
   vivo(); }
@@ -528,7 +555,7 @@ function pLobby(){ const host=S.jugadores[0].id===miId;
       <div class="flex justify-between"><span>Grupos que la completaron</span><b class="text-elderberry">${r.completada}</b></div><div class="flex justify-between"><span>Dificultad</span><b class="text-poppy">${dif(r.dificultad)}</b></div></div>
     ${r.activa&&host?`<button onclick="accion({k:'ruta',ruta:'${r.id}'})" class="mt-3 w-full py-2.5 rounded-2xl ${S.ruta===r.id?'bg-poppy':'bg-wine/20 text-elderberry'} text-white font-bold text-sm">${S.ruta===r.id?'✓ elegida':'elegir'}</button>`:''}</div>`).join('')}
   <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[440px] px-4 pt-6 pb-9 bg-gradient-to-t from-[#f7eadc] via-[#f7eadc] to-transparent">
-    ${host?(S.jugadores.length<2?'<p class="text-center text-xs font-bold text-wine">Se necesitan al menos 2 jugadores</p>':btn('Repartir roles →',"accion({k:'comenzar'})",'bg-elderberry')):`<p class="text-center text-sm font-bold text-elderberry">Esperando que ${esc(S.jugadores[0].nombre)} reparta los roles…</p>`}</div></div>`; }
+    ${host?(!S.ruta?'<p class="text-center text-xs font-bold text-wine">Elige un recorrido para continuar</p>':S.jugadores.length<2?'<p class="text-center text-xs font-bold text-wine">Se necesitan al menos 2 jugadores</p>':btn('Repartir roles →',"accion({k:'comenzar'})",'bg-elderberry')):`<p class="text-center text-sm font-bold text-elderberry">Esperando que ${esc(S.jugadores[0].nombre)} reparta los roles…</p>`}</div></div>`; }
 
 function pRoles(){ const prof=quien('profeta')===miId;
   if (!prof) return `<div class="entra min-h-[100dvh] bg-grass px-6 flex flex-col justify-center text-center text-whitesand">${avatar('profeta','w-24 h-24 mx-auto')}
@@ -564,6 +591,16 @@ function widgetBrujula(rumbo, mision){ return `<div data-montar="brujula" data-r
   <p id="rumbo-txt" class="mt-2 text-sm font-bold text-whitesand">gira el celular</p>
   <input id="rumbo-slider" type="range" min="0" max="359" value="0" class="w-full mt-2 accent-[#D6533F]"><p class="text-xs text-whitesand/70">Si tu celular no tiene brújula, gira con la barra.</p></div>`; }
 
+// Cambiar de persona en el NFC: quien lo pide + aprobación de todos los jugadores
+function panelPase(meToca,prof){ const p=S.pase;
+  if (!p) return (meToca||prof)?`<button onclick="accion({k:'pasarNFC'})" class="mt-2 w-full py-2.5 rounded-xl bg-elderberry text-whitesand text-sm font-bold">${meToca?'No puedo tocar el NFC · pedir pasarlo a otro':'Cambiar quién toca el NFC'}</button>`:'';
+  const yaVote=p.ok.includes(miId), total=S.jugadores.length;
+  return `<div class="mt-2 rounded-xl bg-elderberry p-3"><p class="text-xs font-bold uppercase text-poppy">Cambio de NFC · todos deben aprobar</p>
+    <p class="text-sm mt-1"><b>${esc(nombre(p.por))}</b> propone que el NFC lo toque <b>${esc(nombre(p.a))}</b> en vez de ${esc(nombre(p.de))}.</p>
+    <p class="text-xs mt-1 text-whitesand/80">Aprobaron ${p.ok.length} de ${total}: ${p.ok.map(i=>esc(nombre(i))).join(', ')}</p>
+    ${yaVote?'<p class="text-xs mt-2 font-bold">Esperando a los demás…</p>'
+      :`<div class="flex gap-2 mt-2"><button onclick="accion({k:'votarPase',ok:true})" class="flex-1 py-2.5 rounded-xl bg-poppy font-bold text-sm">Aprobar</button><button onclick="accion({k:'votarPase',ok:false})" class="flex-1 py-2.5 rounded-xl bg-whitesand/15 font-bold text-sm">Rechazar</button></div>`}
+    ${(miId===p.por||prof)?`<button onclick="accion({k:'cancelarPase'})" class="mt-2 w-full py-2 rounded-xl bg-whitesand/15 text-xs font-bold">Cancelar la solicitud</button>`:''}</div>`; }
 function pCamino(){ const cp=cpAct(), prof=tengo('profeta'), nav=tengo('navegador'), meToca=S.nfcTurno===miId;
   return `<div class="entra min-h-[100dvh] bg-grass pb-10">
   <div class="px-4 pt-3 flex justify-between items-center"><span class="px-3 py-1 rounded-full bg-ashwagandha/90 text-whitesand text-xs font-bold">${chipRoles(miId)}</span>
@@ -575,7 +612,7 @@ function pCamino(){ const cp=cpAct(), prof=tengo('profeta'), nav=tengo('navegado
           :`<p class="text-sm">Pregúntale al Profeta (<b>${esc(nombre(quien('profeta')))}</b>) por la pista.</p>`}
     ${nav?`<div class="bg-elderberry/60 rounded-2xl p-3"><p class="text-xs font-bold uppercase text-poppy mb-1">Tu brújula: dirección general</p>${widgetBrujula(cp.rumbo,false)}</div>`:''}
     <div class="rounded-2xl p-3 ${meToca?'bg-poppy':'bg-wine/60'}"><p class="text-sm font-bold">${meToca?'¡Te toca a ti! Al llegar, acerca tu celular al NFC '+cp.nfc+'.':'Al llegar, el NFC lo debe tocar: '+esc(nombre(S.nfcTurno))}</p>
-      ${'NDEFReader' in window?(nfcActivo?`<p class="text-xs mt-1">✓ NFC activo en este celular</p>`:`<button onclick="leerNFC()" class="mt-2 w-full py-3 rounded-xl bg-elderberry text-whitesand font-bold">((·)) Activar NFC (Android)</button>`):''}${meToca?`<button onclick="accion({k:'nfc',n:${cp.nfc}})" class="mt-2 w-full py-2.5 rounded-xl bg-whitesand/15 text-whitesand text-sm font-bold">Simular NFC ${cp.nfc} (prueba)</button>`:''}</div>
+      ${'NDEFReader' in window?(nfcActivo?`<p class="text-xs mt-1">✓ NFC activo en este celular</p>`:`<button onclick="leerNFC()" class="mt-2 w-full py-3 rounded-xl bg-elderberry text-whitesand font-bold">((·)) Activar NFC (Android)</button>`):''}${meToca?`<button onclick="accion({k:'nfc',n:${cp.nfc}})" class="mt-2 w-full py-2.5 rounded-xl bg-whitesand/15 text-whitesand text-sm font-bold">Simular NFC ${cp.nfc} (prueba)</button>`:''}${panelPase(meToca,prof)}</div>
     ${prof&&!S.ayuda?`<button onclick="accion({k:'ayuda'})" class="w-full py-2 rounded-xl bg-whitesand/15 text-xs font-bold">Pedir ayuda (cuenta en las estadísticas)</button>`:''}</div></div>`; }
 
 function cabeceraMision(){ const m=S.mision, cp=cpAct(); return `<div class="flex justify-between items-center"><span class="px-3 py-1 rounded-full bg-wine text-whitesand text-xs font-bold">Punto ${S.cp+1} · ${cp.lugar}</span><span class="text-xs font-bold text-whitesand/80">${chipRoles(miId)}</span></div>
