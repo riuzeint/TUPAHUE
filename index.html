@@ -14,7 +14,7 @@
     fontFamily: { brand:['Fredoka','sans-serif'], sans:['Nunito','sans-serif'] } } } };
 </script>
 <style>
-  html{color-scheme:light;font-size:17.5px;overflow-x:hidden}
+  html{color-scheme:light;font-size:18.5px;overflow-x:hidden}
   body{font-family:'Nunito',sans-serif;background:#f3e8dd;background-image:radial-gradient(#E5C1A1 1.5px,transparent 1.5px);background-size:24px 24px;overflow-x:hidden}
   h1,h2,h3,.font-brand{font-family:'Fredoka',sans-serif}
   input,textarea{color:#E5C1A1;-webkit-text-fill-color:#E5C1A1}
@@ -70,18 +70,26 @@ const RUTAS = [
 ];
 
 const MISIONES = {
-  equilibrio:{ titulo:'Equilibrio en orden', resumen:'Cada uno presiona su botón en orden (1, 2, 3…) mientras el Equilibrista mantiene su celular nivelado. Si se adelantan o el celular se inclina, se reinicia.' },
-  colores:   { titulo:'Cazadores de color', resumen:'Yo les digo un color. El Fotógrafo busca algo de ese color y lo fotografía. La foto solo cuenta si el Equilibrista mantiene su celular nivelado: es el trípode del grupo. Son 3 colores.' },
-  fotos:     { titulo:'Fotografía contra el tiempo', resumen:'El Profeta dicta qué fotografiar. El Fotógrafo lo encuentra y le saca una foto. El tiempo se agota rápido si el Agitador deja de moverse.' },
-  sonidos:   { titulo:'Colección de sonidos', resumen:'Yo les pido un sonido. Todos lo hacen juntos mientras el Micrófono graba 3 segundos. Yo escucho la grabación y decido si vale. Son 3 sonidos.' },
-  brujula:   { titulo:'Brújula ciega', resumen:'El Navegador debe apuntar en la dirección secreta durante 3 segundos para ver la palabra clave. El Profeta debe escribirla.' },
+  // voz = lo que lee el Profeta (corto). Las tareas de cada rol se arman en la sección 5 (prepararMision).
+  equilibrio:{ titulo:'Equilibrio en orden', voz:'Cada uno tiene un número secreto. Presionen en orden: 1, 2, 3… El Equilibrista mantiene su celular plano todo el rato.' },
+  colores:   { titulo:'Cazadores de color',  voz:'Busquen algo de color {obj}. Cada rol tiene una tarea: ¡miren su celular!' },
+  fotos:     { titulo:'Fotografía contra el tiempo', voz:'Encuentren y fotografíen {obj}. ¡El tiempo corre! Agitador y Equilibrista lo frenan.' },
+  sonidos:   { titulo:'Colección de sonidos', voz:'Todos juntos: {obj}. Cada rol tiene una tarea mientras suena.' },
+  brujula:   { titulo:'Brújula ciega', voz:'La palabra secreta está repartida entre ustedes. Cumplan su tarea, díctenme su pedazo y yo la escribo.' },
 };
-// Objetos que la IA puede reconocer en la misión de fotos (nombre en inglés de la IA → texto)
+// Objetos para la IA de fotos. "ia" = nombres que la IA puede devolver para ese objeto (se acepta cualquiera)
 const OBJETOS = [
-  { ia:'chair', es:'una silla' }, { ia:'bottle', es:'una botella' }, { ia:'backpack', es:'una mochila' },
-  { ia:'book', es:'un libro' }, { ia:'laptop', es:'un notebook' }, { ia:'cup', es:'una taza o vaso' },
-  { ia:'potted plant', es:'una planta' }, { ia:'clock', es:'un reloj' }, { ia:'cell phone', es:'un celular' },
+  { ia:['chair','bench','couch'], es:'una silla' }, { ia:['bottle','vase','cup'], es:'una botella' }, { ia:['backpack','handbag','suitcase'], es:'una mochila o bolso' },
+  { ia:['book','laptop'], es:'un libro o cuaderno' }, { ia:['laptop','tv','keyboard'], es:'un computador' }, { ia:['cup','wine glass','bottle','bowl'], es:'un vaso o taza' },
+  { ia:['potted plant','vase'], es:'una planta' }, { ia:['cell phone','remote'], es:'un celular' }, { ia:['person'], es:'una persona del grupo' },
 ];
+const INTENTOS_FOTO = 2;    // si la IA falla esta cantidad de veces, se regala la foto (para no trabar el juego)
+const RUMBOS = [{g:0,es:'NORTE'},{g:90,es:'ESTE'},{g:180,es:'SUR'},{g:270,es:'OESTE'}];
+// Insignias por rol (se ganan al terminar la ruta y quedan guardadas en el celular)
+const INSIGNIAS = {
+  profeta:{ nombre:'Voz del Cerro', icono:'📜' }, navegador:{ nombre:'Brújula Humana', icono:'🧭' }, fotografo:{ nombre:'Ojo de Cóndor', icono:'📷' },
+  agitador:{ nombre:'Motor del Grupo', icono:'⚡' }, microfono:{ nombre:'Oído Fino', icono:'🎙️' }, equilibrista:{ nombre:'Pulso Firme', icono:'⚖️' },
+};
 const TIEMPO_FOTOS = 90;        // segundos de la misión de fotos
 // Colores de la misión "Cazadores de color" (h = rangos de tono, 0-360)
 const COLORES = [
@@ -89,7 +97,7 @@ const COLORES = [
   { id:'amarillo', es:'AMARILLO', hex:'#E8C547', h:[[40,68]] },  { id:'verde', es:'VERDE', hex:'#5E9E4A', h:[[68,165]] },
   { id:'azul', es:'AZUL', hex:'#3F6FD6', h:[[185,255]] },       { id:'morado', es:'MORADO', hex:'#863B56', h:[[255,340]] },
 ];
-const PORC_COLOR = 12;      // % mínimo de la foto que debe tener el color
+const PORC_COLOR = 8;       // % mínimo de la foto que debe tener el color
 // Sonidos de la misión "Colección de sonidos"
 const SONIDOS = ['un aplauso de todos al mismo tiempo','un silbido','una risa grupal','todos diciendo "¡Tupahue!"','golpes en una mesa o pared, al mismo ritmo','un "shhh" muy largo de todos'];
 const UMBRAL_SONIDO = 35;   // volumen mínimo (0-100) para que la grabación cuente
@@ -121,7 +129,7 @@ const arbol = (x,y,s=1)=> IMG_OK.arbol ? `<image href="img/arbol.png" x="${x-20*
 const POS = [[30,88],[60,74],[34,58],[58,42],[40,26],[56,10]];
 // Dibujos a mano: si existe img/<nombre>.png se usa; si no, aparece el dibujo por defecto
 const IMG_OK = {};
-['logo','fondo-inicio','rol-profeta','rol-navegador','rol-fotografo','rol-agitador','rol-microfono','rol-equilibrista','arbol','sello-postal']
+['logo','fondo-inicio','rol-profeta','rol-navegador','rol-fotografo','rol-agitador','rol-microfono','rol-equilibrista','arbol','sello-postal','insignia-profeta','insignia-navegador','insignia-fotografo','insignia-agitador','insignia-microfono','insignia-equilibrista']
   .forEach(n=>{ const i=new Image(); i.onload=()=>{ IMG_OK[n]=true; render(true); }; i.src='img/'+n+'.png'; });
 const png = (n,cls='') => `<img src="img/${n}.png" class="${cls}" alt="">`;
 const dif = n => Array.from({length:10},(_,i)=>`<span class="inline-block w-2 h-3 rounded-sm mr-0.5 align-middle ${i<n?'bg-poppy':'bg-current opacity-25'}"></span>`).join('')+` <span class="align-middle">${n}/10</span>`;
@@ -194,25 +202,49 @@ function elegirNFC(){ // al azar; si hay 2+ personas, nunca el Profeta (en iPhon
   const ids=S.jugadores.map(j=>j.id), op = ids.length>1 ? ids.filter(i=>i!==quien('profeta')) : ids;
   S.nfcTurno = op[Math.floor(Math.random()*op.length)];
 }
+// --- Tareas por rol: cada misión tiene "rondas" y en cada ronda cada rol tiene UNA tarea ---
+const rumboAzar = () => RUMBOS[Math.floor(Math.random()*4)];
+function tareaRumbo(){ const r=rumboAzar(); return { t:'rumbo', rumbo:r.g, txt:'Apunta al '+r.es+' y mantén 3 segundos' }; }
 function prepararMision(cp){
-  const ids=S.jugadores.map(j=>j.id), base={ tipo:cp.mision, errores:0, inicio:Date.now() };
+  const ids=S.jugadores.map(j=>j.id), base={ tipo:cp.mision, errores:0, inicio:Date.now(), ronda:0 };
   if (cp.mision==='equilibrio') return { ...base, orden:mezclar(ids), paso:0, nivel:false };
-  if (cp.mision==='colores')    return { ...base, objetivos:mezclar(COLORES).slice(0,3), hechos:0, pendiente:null, nivel:false };
-  if (cp.mision==='fotos')      return { ...base, objetivos:mezclar(OBJETOS).slice(0,3), hechos:0, pendiente:null, tiempo:TIEMPO_FOTOS, ultimaEnergia:0, energia:0 };
-  if (cp.mision==='sonidos')    return { ...base, objetivos:mezclar(SONIDOS).slice(0,3), hechos:0, pendiente:null };
-  if (cp.mision==='brujula')    return { ...base, revelado:false };
+  if (cp.mision==='colores') return { ...base, rondas: mezclar(COLORES).slice(0,2).map(c=>({ obj:c.es, hex:c.hex, tareas:{
+      agitador:{ t:'agitar', meta:20, txt:'Carga el flash: agita o toca 20 veces' },
+      equilibrista:{ t:'nivel', txt:'Sé el trípode: celular plano 3 segundos' },
+      fotografo:{ t:'foto', modo:'color', color:c.id, requiere:'agitador', txt:'Fotografía algo '+c.es },
+      microfono:{ t:'grabar', txt:'Graben un poema de una frase para el color '+c.es },
+      navegador:tareaRumbo() } })) };
+  if (cp.mision==='fotos') return { ...base, tiempo:TIEMPO_FOTOS, ultimaEnergia:0, energia:0, nivel:false,
+    rondas: mezclar(OBJETOS).slice(0,2).map(o=>({ obj:o.es, tareas:{
+      fotografo:{ t:'foto', modo:'objeto', ia:o.ia, txt:'Fotografía '+o.es },
+      microfono:{ t:'grabar', txt:'Griten todos: "¡'+o.es.replace(/^(un|una) /,'').toUpperCase()+'!"' },
+      navegador:tareaRumbo() } })) };   // Agitador y Equilibrista frenan el reloj (tarea continua)
+  if (cp.mision==='sonidos') return { ...base, rondas: mezclar(SONIDOS).slice(0,2).map(s=>({ obj:s, tareas:{
+      microfono:{ t:'grabar', txt:'Graba 3 segundos: '+s },
+      agitador:{ t:'agitar', meta:15, txt:'Marca el ritmo: agita 15 veces' },
+      equilibrista:{ t:'nivel', txt:'Quietud total: celular plano 3 segundos' },
+      fotografo:{ t:'foto', modo:'libre', txt:'Fotografía al grupo haciendo el sonido' },
+      navegador:tareaRumbo() } })) };
+  if (cp.mision==='brujula'){ const w=cp.palabra, partes=[], n=4, tam=Math.ceil(w.length/n); for(let i=0;i<w.length;i+=tam) partes.push(w.slice(i,i+tam));
+    const r=(i,txt,t)=>({ ...t, txt, frag:partes[i]||'', num:i+1, de:partes.length });
+    return { ...base, rondas:[{ obj:'', tareas:{
+      navegador:r(0,'Encuentra la dirección secreta y mantén 3 segundos',{ t:'rumbo', rumbo:cp.rumboSecreto }),
+      equilibrista:r(1,'Mantén el celular plano 3 segundos',{ t:'nivel' }),
+      agitador:r(2,'Agita o toca 20 veces',{ t:'agitar', meta:20 }),
+      fotografo:r(3,'Fotografía la puerta del LID',{ t:'foto', modo:'libre' }),
+      microfono:{ t:'grabar', txt:'Graben al grupo susurrando la palabra cuando la tengan' } } }] }; }
 }
-// Reloj de la misión de fotos (el anfitrión lo descuenta cada segundo)
+// Reloj de la misión de fotos: corre más rápido si el Agitador para o el Equilibrista se inclina
 setInterval(()=>{
   if (!soyAnfitrion || !S || S.fase!=='mision' || S.mision.tipo!=='fotos') return;
   const m=S.mision, activo = Date.now()-m.ultimaEnergia < 2500;
-  m.tiempo -= activo ? 1 : 3; m.energia = Math.max(0, m.energia-12);
-  if (m.tiempo<=0){ m.errores++; S.stats.errores++; aviso('¡Se acabó el tiempo! Empiecen de nuevo.'); m.tiempo=TIEMPO_FOTOS; m.hechos=0; m.pendiente=null; }
+  m.tiempo -= 1 + (activo?0:2) + (m.nivel?0:1); m.energia = Math.max(0, m.energia-12);
+  if (m.tiempo<=0){ m.errores++; S.stats.errores++; aviso('¡Se acabó el tiempo! El reloj vuelve a empezar (no pierden lo avanzado).'); m.tiempo=TIEMPO_FOTOS; }
   cambio();
 }, 1000);
 
 function procesar(id, a){
-  const m=S.mision, cp=S.fase!=='lobby'?cpAct():null;
+  const m=S.mision, cp=S.fase!=='lobby'&&S.ruta?cpAct():null;
   const err = t => { if(m) m.errores++; S.stats.errores++; aviso(t); };
   switch(a.k){
     // --- sala ---
@@ -224,69 +256,62 @@ function procesar(id, a){
     case 'rolesListos': if(id===quien('profeta')) S.fase='revelar'; break;
     case 'iniciar': if(id===quien('profeta')){ S.fase='camino'; S.cp=0; S.stats.inicio=Date.now(); elegirNFC(); } break;
     case 'ayuda': S.ayuda=true; S.stats.ayudas++; break;
-    // --- pasar el turno del NFC a otro jugador (lo puede pedir quien tiene el turno o el Profeta) ---
+    // --- COMODÍN del Profeta: cambia al instante quién toca el NFC (si esa persona no puede) ---
+    case 'comodin': { if (S.fase!=='camino' || id!==quien('profeta')) return;
+      const ids=S.jugadores.map(j=>j.id).filter(i=>i!==S.nfcTurno), sinP=ids.filter(i=>i!==quien('profeta')), op=sinP.length?sinP:ids;
+      if (!op.length) return; S.nfcTurno=op[Math.floor(Math.random()*op.length)]; S.pase=null; S.stats.ayudas++;
+      aviso('Comodín: ahora el NFC lo toca '+nombre(S.nfcTurno)+'.'); break; }
+    // --- pasar el turno del NFC con votación (lo pide quien tiene el turno o el Profeta) ---
     case 'pasarNFC': {
-      if (S.fase!=='camino' || (id!==S.nfcTurno && id!==quien('profeta'))) return;
-      if (S.pase) return;   // ya hay una solicitud abierta
-      const ids=S.jugadores.map(j=>j.id), actual=S.nfcTurno;
-      const otros=ids.filter(i=>i!==actual);
-      if (!otros.length) return;
-      const sinProfeta=otros.filter(i=>i!==quien('profeta'));   // preferimos no pasarle el NFC al Profeta
-      const lista=sinProfeta.length?sinProfeta:otros;
-      // siguiente en orden de la sala, después del que tenía el turno
+      if (S.fase!=='camino' || (id!==S.nfcTurno && id!==quien('profeta')) || S.pase) return;
+      const ids=S.jugadores.map(j=>j.id), actual=S.nfcTurno, otros=ids.filter(i=>i!==actual); if (!otros.length) return;
+      const sinProfeta=otros.filter(i=>i!==quien('profeta')), lista=sinProfeta.length?sinProfeta:otros;
       const despues=ids.slice(ids.indexOf(actual)+1).concat(ids.slice(0,ids.indexOf(actual))).find(i=>lista.includes(i)) || lista[0];
-      // se abre una votación: todos los jugadores deben aprobar (quien la pide ya aprueba)
       S.pase={ por:id, de:actual, a:despues, ok:[id] };
-      aviso(nombre(id)+' pide pasar el turno del NFC de '+nombre(actual)+' a '+nombre(despues)+'. Todos deben aprobar.');
-      if (S.pase.ok.length>=ids.length) aplicarPase();
-      break; }
+      aviso(nombre(id)+' pide que el NFC lo toque '+nombre(despues)+'. Aprueben.');
+      if (votantes().every(v=>S.pase.ok.includes(v))) aplicarPase(); break; }
     case 'votarPase': {
       if (S.fase!=='camino' || !S.pase || S.pase.ok.includes(id)) return;
-      if (!a.ok){ aviso(nombre(id)+' rechazó el cambio de NFC. Se queda '+nombre(S.pase.de)+'.'); S.pase=null; break; }
-      S.pase.ok.push(id);
-      if (S.jugadores.every(j=>S.pase.ok.includes(j.id))) aplicarPase();
-      break; }
+      if (!a.ok){ aviso(nombre(id)+' rechazó el cambio de NFC.'); S.pase=null; break; }
+      S.pase.ok.push(id); if (votantes().every(v=>S.pase.ok.includes(v))) aplicarPase(); break; }
     case 'cancelarPase': if(S.pase && (id===S.pase.por || id===quien('profeta'))) S.pase=null; break;
     // --- NFC ---
     case 'nfc':
       if (S.fase!=='camino') return;
       if (a.n!==cp.nfc) { aviso('Ese NFC no es el de este punto. Busquen el '+cp.nfc+'.'); break; }
       if (id!==S.nfcTurno) { aviso('¡No! Le toca a '+nombre(S.nfcTurno)+' acercar su celular.'); break; }
+      if (a.manual) S.stats.nfcManual=(S.stats.nfcManual||0)+1;
       S.ayuda=false; S.pase=null;
       if (cp.final) S.fase='cierre'; else { S.fase='mision'; S.mision=prepararMision(cp); }
       break;
-    // --- misión 1: equilibrio en orden ---
+    // --- misión: equilibrio en orden ---
     case 'nivel': if(!m||!('nivel' in m)||id!==quien('equilibrista')) return;
-      if (m.tipo==='equilibrio' && m.nivel && !a.ok && m.paso>0){ m.paso=0; err('¡Se perdió el equilibrio! Vuelvan al 1.'); }
+      if (m.tipo==='equilibrio' && m.nivel && !a.ok && m.paso>0){ m.paso=0; falloRol('equilibrista'); err('¡Se perdió el equilibrio! Vuelvan al 1.'); }
       m.nivel=a.ok; break;
     case 'presionar': if(!m||m.tipo!=='equilibrio') return;
-      if (!m.nivel) { m.paso=0; err('El celular del Equilibrista no está nivelado.'); break; }
+      if (!m.nivel) { m.paso=0; err('El celular del Equilibrista no está plano.'); break; }
       if (m.orden[m.paso]===id){ m.paso++; if(m.paso>=m.orden.length) return completar(); }
       else { m.paso=0; err('¡Alguien se adelantó! Vuelvan al 1.'); }
       break;
-    // --- misión 2: cazadores de color ---
-    case 'fotoColor': if(!m||m.tipo!=='colores'||id!==quien('fotografo')) return;
-      MEDIA.push({tipo:'img', src:a.thumb, txt:'Color '+m.objetivos[m.hechos].es.toLowerCase()+' · '+nombre(id)});
-      if (!m.nivel){ err('La foto salió movida: el Equilibrista no estaba nivelado. Repitan.'); break; }
-      if (a.ok){ m.hechos++; aviso('¡Color '+m.objetivos[m.hechos-1].es.toLowerCase()+' encontrado! ✓'); if(m.hechos>=m.objetivos.length) return completar(); }
-      else m.pendiente={ thumb:a.thumb, vio:a.vio };
-      break;
-    // --- misión 3: fotos contra el tiempo ---
-    case 'energia': if(m&&m.tipo==='fotos'&&id===quien('agitador')){ m.ultimaEnergia=Date.now(); m.energia=Math.min(100,m.energia+a.c*10); } return; // sin redibujar
-    case 'foto': if(!m||m.tipo!=='fotos'||id!==quien('fotografo')) return;
-      MEDIA.push({tipo:'img', src:a.thumb, txt:'Foto de '+nombre(id)});
-      if (a.etiquetas && a.etiquetas.includes(m.objetivos[m.hechos].ia)) { m.hechos++; aviso('La IA reconoció '+m.objetivos[m.hechos-1].es+'. ✓'); if(m.hechos>=m.objetivos.length) return completar(); }
-      else m.pendiente={ thumb:a.thumb, vio:(a.etiquetas||[]).join(', ') };
-      break;
-    case 'aprobar': if(!m||!['fotos','colores','sonidos'].includes(m.tipo)||id!==quien('profeta')||!m.pendiente) return;
-      m.pendiente=null; if(a.ok){ m.hechos++; if(m.hechos>=m.objetivos.length) return completar(); } else err('No sirvió. Intenten otra vez.');
-      break;
-    // --- misión 4: colección de sonidos ---
-    case 'sonido': if(!m||m.tipo!=='sonidos'||id!==quien('microfono')) return;
-      if (a.clip) MEDIA.push({tipo:'audio', src:a.clip, txt:m.objetivos[m.hechos]});
-      m.pendiente={ clip:a.clip, max:a.max }; break;
-    // --- misión 5: brújula ciega ---
-    case 'alineado': if(m&&m.tipo==='brujula'&&id===quien('navegador')) m.revelado=true; break;
+    // --- misión de fotos: el Agitador mantiene vivo el reloj ---
+    case 'energia': if(m&&m.tipo==='fotos'&&id===quien('agitador')){ m.ultimaEnergia=Date.now(); m.energia=Math.min(100,m.energia+a.c*10); } return;
+    // --- TAREAS por rol (todas las misiones nuevas) ---
+    case 'tarea': {
+      if (!m || !m.rondas) return; const R=m.rondas[m.ronda], T=R&&R.tareas[a.rol];
+      if (!T || T.hecho || quien(a.rol)!==id) return;
+      if (T.requiere && R.tareas[T.requiere] && !R.tareas[T.requiere].hecho) return;
+      if (T.t==='foto'){ if (a.thumb) MEDIA.push({tipo:'img', src:a.thumb, txt:(R.obj?R.obj+' · ':'')+nombre(id)});
+        if (!a.ok){ T.intentos=(T.intentos||0)+1; falloRol('fotografo');
+          if (T.intentos<INTENTOS_FOTO){ err('La cámara no lo reconoció ('+(a.vio||'?')+'). Intenten otra foto.'); break; }
+          aviso('La cámara no lo reconoció, pero les damos esta foto. ✓'); } }
+      if (T.t==='grabar' && a.clip) MEDIA.push({tipo:'audio', src:a.clip, txt:R.obj||'sonido'});
+      T.hecho=true; okRol(a.rol);
+      if (Object.values(R.tareas).every(t=>t.hecho)){
+        if (m.tipo==='brujula') break;                       // falta que el Profeta escriba la palabra
+        m.ronda++; if (m.ronda>=m.rondas.length) return completar();
+        aviso('¡Ronda lista! Siguiente: '+m.rondas[m.ronda].obj);
+      }
+      break; }
     case 'clave': if(!m||m.tipo!=='brujula'||id!==quien('profeta')) return;
       if (a.w.trim().toUpperCase()===cp.palabra) return completar(); err('"'+a.w.toUpperCase()+'" no es la palabra.');
       break;
@@ -295,8 +320,12 @@ function procesar(id, a){
   }
   cambio();
 }
+const votantes = () => S.jugadores.map(j=>j.id).filter(i=>!S.pase || i!==S.pase.de);   // quien no puede tocar el NFC no necesita votar
+function rolStat(r){ S.stats.rol=S.stats.rol||{}; return S.stats.rol[r]=S.stats.rol[r]||{ok:0,fallos:0}; }
+function okRol(r){ rolStat(r).ok++; }
+function falloRol(r){ rolStat(r).fallos++; }
 function aplicarPase(){ const p=S.pase; if(!p) return; S.nfcTurno=p.a; S.pase=null;
-  aviso('Todos aprobaron: ahora le toca a '+nombre(p.a)+' acercar su celular al NFC.'); }
+  aviso('Aprobado: ahora el NFC lo toca '+nombre(p.a)+'.'); }
 function completar(){
   const m=S.mision; S.stats.misiones.push({ tipo:m.tipo, seg:Math.round((Date.now()-m.inicio)/1000), errores:m.errores });
   S.mision=null; S.cp++; S.fase='camino'; S.ayuda=false; S.aviso=null; S.celebrar=Date.now(); elegirNFC(); cambio();
@@ -317,24 +346,19 @@ const B={};
 function tras(clave, ms, fn){ const k=clave+'|'+S.cp+'|'+S.fase; if(!B[k]) B[k]=Date.now(); else if(Date.now()-B[k]>=ms && !B[k+'!']){ B[k+'!']=1; fn(); } }
 const esBot = id => id && id.startsWith('bot');
 setInterval(()=>{
-  if (!simulado || !S) return; const m=S.mision, cp=S.fase!=='lobby'?cpAct():null;
-  if (S.fase==='camino' && S.pase){ const b=S.jugadores.find(j=>esBot(j.id) && !S.pase.ok.includes(j.id)); if(b) return procesar(b.id,{k:'votarPase',ok:true}); }   // los bots aprueban
+  if (!simulado || !S) return; const m=S.mision, cp=S.fase!=='lobby'&&S.ruta?cpAct():null;
+  if (S.fase==='camino' && S.pase){ const b=votantes().find(v=>esBot(v) && !S.pase.ok.includes(v)); if(b) return procesar(b,{k:'votarPase',ok:true}); }
   if (S.fase==='camino' && esBot(S.nfcTurno)) tras('nfc', 3000, ()=>procesar(S.nfcTurno,{k:'nfc',n:cp.nfc}));
   if (S.fase!=='mision' || !m) return;
   if (m.tipo==='equilibrio'){
     if (esBot(quien('equilibrista')) && !m.nivel) procesar(quien('equilibrista'),{k:'nivel',ok:true});
     const t=m.orden[m.paso]; if (esBot(t) && m.nivel) tras('p'+m.paso+m.errores, 900, ()=>procesar(t,{k:'presionar'}));
   }
-  if (m.tipo==='colores'){
-    if (esBot(quien('equilibrista')) && !m.nivel) procesar(quien('equilibrista'),{k:'nivel',ok:true});
-    if (esBot(quien('fotografo')) && !m.pendiente && m.nivel) tras('c'+m.hechos+m.errores, 5000, ()=>{ const o=m.objetivos[m.hechos]; procesar(quien('fotografo'),{k:'fotoColor',thumb:fotoFalsa(o.es.toLowerCase()),ok:true,vio:o.es.toLowerCase()}); });
-  }
-  if (m.tipo==='fotos'){
-    if (esBot(quien('agitador'))) procesar(quien('agitador'),{k:'energia',c:3});
-    if (esBot(quien('fotografo')) && !m.pendiente) tras('f'+m.hechos+m.errores, 6000, ()=>procesar(quien('fotografo'),{k:'foto',thumb:fotoFalsa(m.objetivos[m.hechos].es),etiquetas:[m.objetivos[m.hechos].ia]}));
-  }
-  if (m.tipo==='sonidos' && esBot(quien('microfono')) && !m.pendiente) tras('s'+m.hechos+m.errores, 4500, ()=>procesar(quien('microfono'),{k:'sonido',clip:null,max:70}));
-  if (m.tipo==='brujula' && esBot(quien('navegador'))) tras('b', 4000, ()=>procesar(quien('navegador'),{k:'alineado'}));
+  if (m.tipo==='fotos'){ if (esBot(quien('agitador'))) procesar(quien('agitador'),{k:'energia',c:3}); if (esBot(quien('equilibrista')) && !m.nivel) procesar(quien('equilibrista'),{k:'nivel',ok:true}); }
+  if (m.rondas){ const R=m.rondas[m.ronda]; if(!R) return;
+    Object.entries(R.tareas).forEach(([rol,T])=>{ const b=quien(rol); if(!esBot(b) || T.hecho) return;
+      if (T.requiere && R.tareas[T.requiere] && !R.tareas[T.requiere].hecho) return;
+      tras('t'+m.ronda+rol, 2500+ORDEN_ROLES.indexOf(rol)*700, ()=>procesar(b,{k:'tarea',rol,ok:true,thumb:T.t==='foto'?fotoFalsa(R.obj||'foto'):null})); }); }
 }, 1000);
 function garabato(){ const c=document.createElement('canvas'); c.width=c.height=240; const x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,240,240); x.strokeStyle='#5B1B3A'; x.lineWidth=4; x.beginPath(); x.moveTo(40,200); for(let i=0;i<8;i++) x.lineTo(40+i*22, 200-i*20+(i%2)*15); x.stroke(); x.strokeRect(150,40,50,60); return c.toDataURL('image/jpeg',.5); }
 function fotoFalsa(t){ const c=document.createElement('canvas'); c.width=c.height=200; const x=c.getContext('2d'); x.fillStyle='#863B56'; x.fillRect(0,0,200,200); x.fillStyle='#E5C1A1'; x.font='bold 18px Nunito,sans-serif'; x.textAlign='center'; x.fillText('foto simulada:',100,90); x.fillText(t,100,118); return c.toDataURL('image/jpeg',.6); }
@@ -372,59 +396,65 @@ function rumboDe(e){ if (e.webkitCompassHeading!=null) return e.webkitCompassHea
 const difAng = (a,b)=>{ let d=Math.abs(a-b)%360; return d>180?360-d:d; };
 
 const MONTAJES = {
-  // Equilibrista: burbuja de nivel
-  nivel(el){ let ok=false, enviado=null, viaSensor=false;
-    const set = v=>{ ok=v; const b=$('burbuja'); if(b) b.classList.toggle('bg-poppy',!v), b.classList.toggle('bg-whitesand',v); const t=$('nivel-txt'); if(t) t.textContent=v?'Nivelado ✓':'Inclinado'; if(enviado!==v){ enviado=v; accion({k:'nivel',ok:v}); } };
+  // Equilibrista (continuo): burbuja de nivel; avisa al anfitrión cuando cambia
+  nivel(el){ let enviado=null, viaSensor=false;
+    const set = v=>{ const b=$('burbuja'); if(b) b.classList.toggle('bg-poppy',!v), b.classList.toggle('bg-whitesand',v); const t=$('nivel-txt'); if(t) t.textContent=v?'Plano ✓':'Inclinado ✗'; if(enviado!==v){ enviado=v; accion({k:'nivel',ok:v}); } };
     escucharOrientacion(e=>{ if(e.beta==null) return; viaSensor=true; const x=Math.max(-40,Math.min(40,e.gamma||0)), y=Math.max(-40,Math.min(40,(e.beta||0)));
       const b=$('burbuja'); if(b) b.style.transform=`translate(${x*1.5}px,${y*1.5}px)`; set(Math.abs(x)<8 && Math.abs(y)<8); });
     const hb=$('nivel-hold'); if(hb){ const on=e=>{e.preventDefault(); if(!viaSensor) set(true)}, off=()=>{ if(!viaSensor) set(false) };
       hb.addEventListener('pointerdown',on); hb.addEventListener('pointerup',off); hb.addEventListener('pointerleave',off); }
     set(false);
   },
-  // Agitador: sacudidas y toques
+  // Agitador (continuo): sacudidas y toques mantienen vivo el reloj
   agitar(el){ let c=0, ult=0;
     const h=e=>{ const a=e.accelerationIncludingGravity; if(!a) return; const g=Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z); if(Math.abs(g-9.8)>6 && Date.now()-ult>120){ c++; ult=Date.now(); } };
     addEventListener('devicemotion',h); alLimpiar(()=>removeEventListener('devicemotion',h));
     const bt=$('tap'); if(bt) bt.addEventListener('pointerdown',e=>{e.preventDefault(); c++; bt.classList.add('scale-95'); setTimeout(()=>bt.classList.remove('scale-95'),80); });
     const iv=setInterval(()=>{ if(c>0){ accion({k:'energia',c}); c=0; } },700); alLimpiar(()=>clearInterval(iv));
   },
-  // Micrófono: graba 3 segundos y mide si se escuchó fuerte
+  // TAREA Agitador: llegar a N sacudidas o toques
+  agitarTarea(el){ const meta=+el.dataset.meta, bar=el.querySelector('[data-barra]'), bt=el.querySelector('[data-tap]'), num=el.querySelector('[data-num]'); let c=0, ult=0, listo=false;
+    const sumar=()=>{ if(listo) return; c++; bar.style.width=Math.min(100,c/meta*100)+'%'; num.textContent=Math.min(c,meta)+' / '+meta; if(c>=meta){ listo=true; bip(990,.2); accion({k:'tarea',rol:'agitador'}); } };
+    const h=e=>{ const a=e.accelerationIncludingGravity; if(!a) return; const g=Math.sqrt(a.x*a.x+a.y*a.y+a.z*a.z); if(Math.abs(g-9.8)>6 && Date.now()-ult>150){ ult=Date.now(); sumar(); } };
+    addEventListener('devicemotion',h); alLimpiar(()=>removeEventListener('devicemotion',h));
+    bt.addEventListener('pointerdown',e=>{ e.preventDefault(); sumar(); bt.classList.add('scale-95'); setTimeout(()=>bt.classList.remove('scale-95'),80); });
+  },
+  // TAREA Equilibrista: celular plano 3 segundos seguidos
+  nivelTarea(el){ const bur=el.querySelector('[data-burbuja]'), bar=el.querySelector('[data-barra]'), hold=el.querySelector('[data-hold]'); let plano=false, viaSensor=false, acum=0, listo=false;
+    escucharOrientacion(e=>{ if(e.beta==null) return; viaSensor=true; const x=Math.max(-40,Math.min(40,e.gamma||0)), y=Math.max(-40,Math.min(40,e.beta||0)); bur.style.transform=`translate(${x*1.5}px,${y*1.5}px)`; plano=Math.abs(x)<8&&Math.abs(y)<8; });
+    const on=e=>{ e.preventDefault(); if(!viaSensor) plano=true; }, off=()=>{ if(!viaSensor) plano=false; };
+    hold.addEventListener('pointerdown',on); hold.addEventListener('pointerup',off); hold.addEventListener('pointerleave',off);
+    const iv=setInterval(()=>{ if(listo) return; acum = plano ? acum+0.1 : 0; bur.classList.toggle('bg-whitesand',plano); bur.classList.toggle('bg-poppy',!plano); bar.style.width=Math.min(100,acum/3*100)+'%';
+      if (acum>=3){ listo=true; bip(990,.2); accion({k:'tarea',rol:'equilibrista'}); } },100); alLimpiar(()=>clearInterval(iv));
+  },
+  // Micrófono: graba 3 segundos; si suena fuerte, la tarea se cumple sola (sin que el Profeta apruebe)
   grabadora(el){ let stream=null, ac=null, an=null, buf=null;
     const medir=()=>{ if(!an) return 0; an.getByteTimeDomainData(buf); let s=0; for(const v of buf){ const d=(v-128)/128; s+=d*d; } return Math.min(100, Math.sqrt(s/buf.length)*300); };
     const b=$('grabar'), est=$('mic-estado'), barra=$('t-vol');
     b.onclick=async()=>{ b.disabled=true;
       try{ if(!stream){ stream=await navigator.mediaDevices.getUserMedia({audio:true}); ac=new (window.AudioContext||window.webkitAudioContext)(); an=ac.createAnalyser(); an.fftSize=512; buf=new Uint8Array(an.fftSize); ac.createMediaStreamSource(stream).connect(an); alLimpiar(()=>{ stream.getTracks().forEach(t=>t.stop()); ac.close(); }); } }
-      catch(e){ est.textContent='Sin micrófono: se envía una grabación simulada.'; setTimeout(()=>accion({k:'sonido',clip:null,max:80}),1500); return; }
+      catch(e){ est.textContent='Sin micrófono: la tarea se marca igual.'; setTimeout(()=>accion({k:'tarea',rol:'microfono',clip:null}),1200); return; }
       let max=0, partes=[], rec=null; try{ rec=new MediaRecorder(stream,{audioBitsPerSecond:24000}); rec.ondataavailable=e=>partes.push(e.data); rec.start(); }catch(e){}
       const t0=Date.now(); est.textContent='Grabando… ¡ahora!';
       const iv=setInterval(()=>{ const v=medir(); max=Math.max(max,v); if(barra) barra.style.width=v+'%'; b.textContent='● '+Math.max(0,3-Math.floor((Date.now()-t0)/1000))+' s';
         if (Date.now()-t0<3000) return; clearInterval(iv);
         const fin=clip=>{ b.disabled=false; b.textContent='● Grabar 3 segundos';
-          if (max<UMBRAL_SONIDO){ est.textContent='Se escuchó muy bajo. ¡Más fuerte, todos!'; return; }
-          est.textContent='Enviado al Profeta para que lo escuche.'; accion({k:'sonido',clip,max:Math.round(max)}); };
+          if (max<UMBRAL_SONIDO){ est.textContent='Muy bajo. ¡Más fuerte y repitan!'; return; }
+          est.textContent='¡Grabado! ✓'; accion({k:'tarea',rol:'microfono',clip}); };
         if (rec){ rec.onstop=()=>{ const bl=new Blob(partes,{type:rec.mimeType}); if(bl.size>150000) return fin(null); const fr=new FileReader(); fr.onload=()=>fin(fr.result); fr.readAsDataURL(bl); }; rec.stop(); } else fin(null);
       },100); alLimpiar(()=>clearInterval(iv));
     };
   },
-  // Navegador: brújula hacia un rumbo (camino o misión)
+  // Navegador: brújula hacia un rumbo (en el camino solo orienta; en una tarea, 3 s apuntando la cumple)
   brujula(el){ const meta=parseFloat(el.dataset.rumbo), mision=el.dataset.mision==='1'; let rumbo=0, viaSensor=false, acum=0, latido=0;
     escucharOrientacion(e=>{ const r=rumboDe(e); if(r!=null){ viaSensor=true; rumbo=r; } });
     const sl=$('rumbo-slider'); if(sl) sl.addEventListener('input',()=>{ if(!viaSensor) rumbo=parseFloat(sl.value); });
     const iv=setInterval(()=>{ const flecha=$('flecha'); if(flecha) flecha.style.transform=`rotate(${meta-rumbo}deg)`;
-      const d=difAng(meta,rumbo), cerca=d<15, txt=$('rumbo-txt'); if(txt) txt.textContent = cerca?'¡Es por aquí!':(Math.round(d)+'° de diferencia');
+      const d=difAng(meta,rumbo), cerca=d<15, txt=$('rumbo-txt'); if(txt) txt.textContent = cerca?'¡Es por aquí! Mantén…':(Math.round(d)+'° de diferencia');
       const anillo=$('anillo'); if(anillo) anillo.classList.toggle('late',cerca);
       if (cerca && Date.now()-latido>900){ latido=Date.now(); bip(1200,.06); vibrar(60); }
-      if (mision){ acum = cerca ? acum+0.1 : 0; if(acum>=3){ acum=-999; accion({k:'alineado'}); } }
+      if (mision){ acum = cerca ? acum+0.1 : 0; if(acum>=3){ acum=-999; accion({k:'tarea',rol:'navegador'}); } }
     },100); alLimpiar(()=>clearInterval(iv));
-  },
-  // Dibujo con el dedo
-  dibujo(el){ const c=$('lienzo'), x=c.getContext('2d'); x.fillStyle='#fff'; x.fillRect(0,0,c.width,c.height); x.strokeStyle='#5B1B3A'; x.lineWidth=5; x.lineCap='round'; x.lineJoin='round';
-    let on=false; const p=e=>{ const r=c.getBoundingClientRect(); return [(e.clientX-r.left)*c.width/r.width,(e.clientY-r.top)*c.height/r.height]; };
-    c.addEventListener('pointerdown',e=>{ on=true; x.beginPath(); x.moveTo(...p(e)); });
-    c.addEventListener('pointermove',e=>{ if(on){ x.lineTo(...p(e)); x.stroke(); } });
-    ['pointerup','pointerleave'].forEach(ev=>c.addEventListener(ev,()=>on=false));
-    $('borrar').onclick=()=>{ x.fillRect(0,0,c.width,c.height); };
-    $('enviar-dibujo').onclick=()=>accion({k:'dibujo',img:c.toDataURL('image/jpeg',.5)});
   },
 };
 
@@ -435,23 +465,19 @@ function cargarIA(){ if(cargandoIA) return cargandoIA;
     s1.onload=()=>{ const s2=document.createElement('script'); s2.src='https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js';
       s2.onload=()=>cocoSsd.load().then(m=>{modeloIA=m;res(m)}).catch(()=>res(null)); s2.onerror=()=>res(null); document.head.appendChild(s2); };
     s1.onerror=()=>res(null); document.head.appendChild(s1); }); return cargandoIA; }
-function tomarFoto(inp){ const f=inp.files[0]; if(!f) return; const st=$('foto-estado'); st.textContent='Analizando la foto…';
+// Foto de una tarea: detecta color, objeto (IA) o acepta cualquier foto ("libre")
+function tomarFotoTarea(inp){ const f=inp.files[0]; if(!f) return; const m=S.mision, T=m.rondas[m.ronda].tareas.fotografo, st=$('foto-estado'); st.textContent='Revisando la foto…';
   const r=new FileReader(); r.onload=()=>{ const img=new Image(); img.onload=async()=>{
-    const c=document.createElement('canvas'), W=360, H=Math.round(360*img.height/img.width); c.width=W; c.height=H; c.getContext('2d').drawImage(img,0,0,W,H);
-    let etiquetas=[]; const m=await Promise.race([cargarIA(), new Promise(r=>setTimeout(()=>r(null),12000))]);
-    if (m){ try{ etiquetas=(await m.detect(c)).filter(p=>p.score>.45).map(p=>p.class); }catch(e){} }
-    st.textContent = m ? ('La IA ve: '+(etiquetas.join(', ')||'nada reconocible')) : 'IA no disponible: el Profeta revisará la foto';
-    accion({k:'foto', thumb:c.toDataURL('image/jpeg',.55), etiquetas}); };
-    img.src=r.result; }; r.readAsDataURL(f); inp.value=''; }
-function tomarFotoColor(inp){ const f=inp.files[0]; if(!f) return; const st=$('foto-estado'); st.textContent='Analizando colores…';
-  const r=new FileReader(); r.onload=()=>{ const img=new Image(); img.onload=()=>{
-    const c=document.createElement('canvas'), W=200, H=Math.round(200*img.height/img.width); c.width=W; c.height=H; const x=c.getContext('2d'); x.drawImage(img,0,0,W,H);
-    const d=x.getImageData(0,0,W,H).data, cuenta={}; let total=0;
-    for(let i=0;i<d.length;i+=16){ const [h,s,l]=hsl(d[i],d[i+1],d[i+2]); total++; if(s<.35||l<.18||l>.85) continue; const col=COLORES.find(k=>k.h.some(([a,b])=>h>=a&&h<b)); if(col) cuenta[col.id]=(cuenta[col.id]||0)+1; }
-    const obj=S.mision.objetivos[S.mision.hechos], pct=(cuenta[obj.id]||0)/Math.max(1,total)*100;
-    const top=Object.entries(cuenta).sort((a,b)=>b[1]-a[1])[0], vio=top?COLORES.find(k=>k.id===top[0]).es.toLowerCase():'sin color claro';
-    st.textContent=obj.es.toLowerCase()+': '+Math.round(pct)+'% de la foto · color principal: '+vio;
-    accion({k:'fotoColor', thumb:c.toDataURL('image/jpeg',.6), ok:pct>=PORC_COLOR, vio}); };
+    const c=document.createElement('canvas'), W=320, H=Math.round(320*img.height/img.width); c.width=W; c.height=H; const x=c.getContext('2d'); x.drawImage(img,0,0,W,H);
+    let ok=true, vio='';
+    if (T.modo==='color'){ const d=x.getImageData(0,0,W,H).data, cuenta={}; let total=0;
+      for(let i=0;i<d.length;i+=16){ const [hh,s,l]=hsl(d[i],d[i+1],d[i+2]); total++; if(s<.3||l<.15||l>.88) continue; const col=COLORES.find(k=>k.h.some(([a,b])=>hh>=a&&hh<b)); if(col) cuenta[col.id]=(cuenta[col.id]||0)+1; }
+      const pct=(cuenta[T.color]||0)/Math.max(1,total)*100, top=Object.entries(cuenta).sort((a,b)=>b[1]-a[1])[0];
+      vio = top?COLORES.find(k=>k.id===top[0]).es.toLowerCase():'sin color claro'; ok = pct>=PORC_COLOR || !!(top && top[0]===T.color); }
+    if (T.modo==='objeto'){ const mo=await Promise.race([cargarIA(), new Promise(r=>setTimeout(()=>r(null),12000))]);
+      if (mo){ let et=[]; try{ et=(await mo.detect(c,10,0.2)).map(p=>p.class); }catch(e){} vio=et.join(', ')||'nada'; ok=et.some(e=>T.ia.includes(e)); } }   // si la IA no carga, se acepta
+    st.textContent = ok ? '¡Reconocida! ✓' : 'No se reconoció ('+vio+')';
+    accion({k:'tarea', rol:'fotografo', thumb:c.toDataURL('image/jpeg',.55), ok, vio}); };
     img.src=r.result; }; r.readAsDataURL(f); inp.value=''; }
 function hsl(r,g,b){ r/=255; g/=255; b/=255; const mx=Math.max(r,g,b), mn=Math.min(r,g,b), l=(mx+mn)/2; if(mx===mn) return [0,0,l];
   const d=mx-mn, s=l>.5?d/(2-mx-mn):d/(mx+mn); const h = mx===r?(g-b)/d+(g<b?6:0) : mx===g?(b-r)/d+2 : (r-g)/d+4; return [h*60,s,l]; }
@@ -481,20 +507,22 @@ const avatar=(r,c='w-12 h-12')=>`<div class="${c} rounded-xl bg-grass/60 border 
 const chipRoles=id=>misRoles(id).map(r=>ROLES[r].nombre).join(' + ');
 
 let ultimaClave='';
-function clave(){ if(!S) return 'L|'+vista+'|'+!!perfil; const m=S.mision;
-  return [S.fase,S.cp,S.nfcTurno,S.pase?S.pase.ok.join(','):'-',S.ruta,S.jugadores.length,S.ayuda,sensoresOK, m&&m.tipo, m&&m.paso!==undefined&&m.tipo==='dibujo'?m.paso:'', m&&m.revelado, m&&m.etapa, m&&m.hechos, m&&!!m.pendiente].join('|'); }
+// La pantalla se redibuja entera solo si cambia algo que ME afecta (así no se cortan grabaciones, brújulas, etc.)
+function clave(){ if(!S) return 'L|'+vista+'|'+!!perfil; const m=S.mision; let t='';
+  if (m && m.rondas){ const R=m.rondas[m.ronda]; t=m.ronda+':'+(R?misRoles().map(r=>{ const T=R.tareas[r]; if(!T) return ''; const q=T.requiere&&R.tareas[T.requiere]; return r+(T.hecho?1:0)+(T.intentos||0)+(q?(q.hecho?1:0):''); }).join(','):'fin'); }
+  return [S.fase,S.cp,S.nfcTurno,S.pase?S.pase.ok.join(','):'-',S.ruta,S.jugadores.length,S.ayuda,sensoresOK,nfcActivo,m&&m.tipo,t].join('|'); }
 function render(forzar){ const k=clave(); if(forzar||k!==ultimaClave){ limpiar(); $('app').innerHTML=pantalla(); ultimaClave=k;
     document.querySelectorAll('[data-montar]').forEach(el=>MONTAJES[el.dataset.montar](el)); window.scrollTo(0,0); }
   vivo(); }
-// Actualiza números que cambian seguido sin redibujar toda la pantalla
+// Actualiza números y la lista del equipo sin redibujar toda la pantalla
 function vivo(){ if(!S||!S.mision) return; const m=S.mision, set=(id,f)=>{ const e=$(id); if(e) f(e); };
-  if (m.tipo==='equilibrio'){ set('t-paso',e=>e.textContent=m.paso); set('t-nivel',e=>{ e.textContent=m.nivel?'Equilibrista nivelado ✓':'Equilibrista inclinado ✗'; e.className=m.nivel?'text-whitesand':'text-poppy'; }); }
+  if (m.tipo==='equilibrio'){ set('t-paso',e=>e.textContent=m.paso); set('t-nivel',e=>{ e.textContent=m.nivel?'Equilibrista: plano ✓':'Equilibrista: inclinado ✗'; e.className='font-bold '+(m.nivel?'text-whitesand':'text-poppy'); }); }
   if (m.tipo==='fotos'){ set('t-tiempo',e=>e.textContent=Math.max(0,m.tiempo)+' s'); set('t-barra',e=>e.style.width=Math.max(0,m.tiempo/TIEMPO_FOTOS*100)+'%'); set('t-energia',e=>e.style.width=m.energia+'%'); }
-  if (m.tipo==='colores') set('t-nivel',e=>{ e.textContent=m.nivel?'trípode nivelado ✓':'trípode inclinado ✗'; e.className=m.nivel?'text-whitesand':'text-poppy'; });
+  set('t-check',e=>{ const h=checklist(); if(e._h!==h){ e._h=h; e.innerHTML=h; } });
 }
 
 function pantalla(){
-  if (!S){ if(vista==='bienvenida') return pBienvenida(); if(!perfil) return pRegistro(); return vista==='unirse'?pUnirse():pInicio(); }
+  if (!S){ if(vista==='nfcsin') return pNfcSin(); if(vista==='bienvenida') return pBienvenida(); if(!perfil) return pRegistro(); return vista==='unirse'?pUnirse():pInicio(); }
   return ({ lobby:pLobby, roles:pRoles, revelar:pRevelar, camino:pCamino, mision:pMision, cierre:pCierre, final:pFinal })[S.fase]();
 }
 
@@ -530,7 +558,7 @@ function pInicio(){ const op=(ico,t,s,on)=>`<button onclick="${on}" class="w-ful
     <div class="relative z-10 flex justify-end"><span class="px-2.5 py-0.5 rounded-full bg-elderberry/75 text-whitesand text-xs font-bold">Hola, ${esc(perfil.nombre)}</span></div>
     <div class="relative z-10 mt-3"><h1 class="text-[44px] leading-none font-bold text-whitesand drop-shadow">Tupahue</h1><p class="font-brand text-sm font-semibold text-whitesand bg-elderberry/70 inline-block px-3.5 py-0.5 rounded-full mt-1">Juega en grupo</p></div></div>
   <div class="px-5 space-y-2.5">${salaGuardada()?op('↺','Volver a la sala '+salaGuardada().cod, salaGuardada().host?'Retoma tu sala como Profeta':'Vuelve a la sala de tu grupo',"volverSala()"):''}${op('✦','Crear sala','Serás el Profeta del grupo',"crearSala(false)")}${op('#','Unirse con código','Únete a la sala de un compañero',"vista='unirse';render()")}${op('⚡','Probar con jugadores simulados','Para practicar sin otros celulares',"crearSala(true)")}</div>
-  <div class="mt-5 px-5"><h2 class="font-bold uppercase tracking-wider text-whitesand mb-2">Rutas</h2>
+  ${misInsignias()}<div class="mt-5 px-5"><h2 class="font-bold uppercase tracking-wider text-whitesand mb-2">Rutas</h2>
     <div class="flex gap-3 overflow-x-auto no-scroll pb-2 snap-x">${RUTAS.map(cardRuta).join('')}</div>
     <p class="text-center mt-4"><button onclick="salirPerfil()" class="text-xs font-bold text-whitesand/70 underline">no soy ${esc(perfil.nombre)}</button></p></div></div>`; }
 
@@ -557,23 +585,6 @@ function pLobby(){ const host=S.jugadores[0].id===miId;
   <div class="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-[440px] px-4 pt-6 pb-9 bg-gradient-to-t from-[#f7eadc] via-[#f7eadc] to-transparent">
     ${host?(!S.ruta?'<p class="text-center text-xs font-bold text-wine">Elige un recorrido para continuar</p>':S.jugadores.length<2?'<p class="text-center text-xs font-bold text-wine">Se necesitan al menos 2 jugadores</p>':btn('Repartir roles →',"accion({k:'comenzar'})",'bg-elderberry')):`<p class="text-center text-sm font-bold text-elderberry">Esperando que ${esc(S.jugadores[0].nombre)} reparta los roles…</p>`}</div></div>`; }
 
-function pRoles(){ const prof=quien('profeta')===miId;
-  if (!prof) return `<div class="entra min-h-[100dvh] bg-grass px-6 flex flex-col justify-center text-center text-whitesand">${avatar('profeta','w-24 h-24 mx-auto')}
-    <h1 class="text-3xl font-bold mt-4">Escucha al Profeta</h1><p class="mt-2 text-sm text-whitesand/90"><b>${esc(nombre(quien('profeta')))}</b> está leyendo los roles del grupo. Cuando termine, verás el tuyo aquí.</p></div>`;
-  return `<div class="entra min-h-[100dvh] bg-grass px-5 pt-5 pb-10">
-  <h1 class="text-2xl font-bold text-whitesand text-center">Eres el Profeta</h1><p class="text-center text-xs font-semibold text-whitesand/85 mb-3">Lee en voz alta el rol de cada persona. Ellos aún no lo ven.</p>
-  <div class="space-y-2.5">${ORDEN_ROLES.map(r=>`<div class="p-2.5 rounded-2xl bg-ashwagandha/90 flex items-center gap-3">${avatar(r)}
-    <div class="flex-1 min-w-0"><div class="flex justify-between gap-1"><span class="font-brand font-bold text-whitesand">${ROLES[r].nombre}</span><span class="text-xs font-bold px-2 py-0.5 rounded-full bg-poppy text-whitesand">${esc(nombre(S.roles[r]))}</span></div>
-    <p class="text-xs text-whitesand/90 leading-snug">${ROLES[r].desc}</p></div></div>`).join('')}</div>
-  <div class="mt-4">${btn('Ya les conté sus roles ✓',"accion({k:'rolesListos'})",'bg-elderberry')}</div></div>`; }
-
-function pRevelar(){ const mis=misRoles(), prof=tengo('profeta');
-  return `<div class="entra min-h-[100dvh] bg-grass px-5 py-10 flex flex-col justify-center text-whitesand"><p class="text-center text-xs font-bold uppercase tracking-widest text-whitesand/80">Tu rol</p>
-  ${mis.map(r=>`<div class="mt-3 p-4 rounded-[26px] bg-poppy border-2 border-whitesand flex items-center gap-3 shadow-lg">${avatar(r,'w-16 h-16')}<div><h2 class="text-xl font-bold">${ROLES[r].nombre}</h2><span class="text-xs font-bold px-2 py-0.5 rounded-full bg-elderberry">${ROLES[r].habilidad}</span><p class="text-xs mt-1">${ROLES[r].desc}</p></div></div>`).join('')}
-  ${!sensoresOK?`<div class="mt-4">${btn('Activar sensores del celular','pedirSensores()','bg-elderberry')}<p class="text-xs text-center mt-1 text-whitesand/75">Necesario en iPhone para brújula, giroscopio y movimiento. En Android también activa el NFC (así no se abren pestañas nuevas).</p></div>`:''}
-  ${prof?`<div class="mt-5 bg-elderberry rounded-[26px] p-4 border border-whitesand/20"><p class="text-xs font-bold uppercase tracking-wider text-poppy">Lee en voz alta</p><p class="mt-1 text-base leading-relaxed">${ruta().intro}</p></div><div class="mt-4">${btn('Comenzar el recorrido →',"accion({k:'iniciar'})")}</div>`
-        :`<p class="mt-6 text-center text-sm font-bold">Escucha al Profeta: va a contar la historia de la ruta.</p>`}</div>`; }
-
 function mapaSVG(){ const n=ruta().checkpoints.length;
   return `<div class="relative w-full h-[330px]"><svg viewBox="0 0 375 330" class="w-full h-full"><ellipse cx="188" cy="165" rx="175" ry="160" fill="#5C4E16" opacity=".22"/>
     <path d="M110 300 C240 270,250 240,130 195 C40 160,230 150,220 120 C200 80,120 95,150 60 C170 35,220 40,210 20" fill="none" stroke="#87332B" stroke-width="30" stroke-linecap="round"/>
@@ -592,86 +603,126 @@ function widgetBrujula(rumbo, mision){ return `<div data-montar="brujula" data-r
   <input id="rumbo-slider" type="range" min="0" max="359" value="0" class="w-full mt-2 accent-[#D6533F]"><p class="text-xs text-whitesand/70">Si tu celular no tiene brújula, gira con la barra.</p></div>`; }
 
 // Cambiar de persona en el NFC: quien lo pide + aprobación de todos los jugadores
+// Recuadro de alto contraste para lo que el Profeta debe leer en voz alta
+const vozAlta=(txt,extra='')=>`<div class="mt-3 rounded-[26px] bg-whitesand text-elderberry p-5 shadow-xl border-4 border-poppy"><p class="text-sm font-extrabold uppercase tracking-widest text-poppy">📢 Lee en voz alta</p><div class="flex items-center gap-3 mt-1">${extra}<p class="text-2xl font-bold leading-snug">${txt}</p></div></div>`;
+const escucha=(t='Escucha al Profeta')=>`<div class="text-center">${avatar('profeta','w-24 h-24 mx-auto')}<h1 class="text-4xl font-bold mt-4">${t}</h1><p class="mt-2 text-lg"><b>${esc(nombre(quien('profeta')))}</b> les va a contar.</p></div>`;
+
+function pRoles(){ const prof=quien('profeta')===miId;
+  if (!prof) return `<div class="entra min-h-[100dvh] bg-grass px-6 flex flex-col justify-center text-whitesand">${escucha()}<p class="text-center mt-3 text-lg">Cuando termine, verás tu rol aquí.</p></div>`;
+  return `<div class="entra min-h-[100dvh] bg-grass px-5 pt-5 pb-10">
+  ${vozAlta('El rol de cada persona. Ellos todavía no lo ven.')}
+  <div class="space-y-2.5 mt-4">${ORDEN_ROLES.map(r=>`<div class="p-3 rounded-2xl bg-ashwagandha flex items-center gap-3">${avatar(r,'w-14 h-14')}
+    <div class="flex-1 min-w-0"><p class="text-lg font-bold text-whitesand leading-tight">${esc(nombre(S.roles[r]))}</p><p class="font-brand text-xl font-semibold text-poppy leading-tight">es ${ROLES[r].nombre}</p></div></div>`).join('')}</div>
+  <div class="mt-5">${btn('Ya les dije sus roles ✓',"accion({k:'rolesListos'})",'bg-elderberry')}</div></div>`; }
+
+function pRevelar(){ const mis=misRoles(), prof=tengo('profeta');
+  return `<div class="entra min-h-[100dvh] bg-grass px-5 py-10 flex flex-col justify-center text-whitesand"><p class="text-center text-sm font-extrabold uppercase tracking-widest">${mis.length>1?'Tus roles':'Tu rol'}</p>
+  ${mis.map(r=>`<div class="mt-3 p-4 rounded-[26px] bg-poppy border-4 border-whitesand flex items-center gap-3 shadow-lg">${avatar(r,'w-20 h-20')}<div><h2 class="text-3xl font-bold leading-none">${ROLES[r].nombre}</h2><p class="text-base mt-1 leading-snug">${ROLES[r].desc}</p></div></div>`).join('')}
+  ${!sensoresOK?`<div class="mt-5">${btn('Activar sensores del celular','pedirSensores()','bg-elderberry')}<p class="text-sm text-center mt-1">Brújula, movimiento y (en Android) NFC.</p></div>`:''}
+  ${prof?`${vozAlta(ruta().intro)}<div class="mt-4">${btn('Comenzar el recorrido →',"accion({k:'iniciar'})")}</div>`:`<p class="mt-8 text-center text-2xl font-bold">Escucha al Profeta: va a contar la historia.</p>`}</div>`; }
+
+// Cambiar de persona en el NFC (votación). Quien no puede tocarlo no necesita votar.
 function panelPase(meToca,prof){ const p=S.pase;
-  if (!p) return (meToca||prof)?`<button onclick="accion({k:'pasarNFC'})" class="mt-2 w-full py-2.5 rounded-xl bg-elderberry text-whitesand text-sm font-bold">${meToca?'No puedo tocar el NFC · pedir pasarlo a otro':'Cambiar quién toca el NFC'}</button>`:'';
-  const yaVote=p.ok.includes(miId), total=S.jugadores.length;
-  return `<div class="mt-2 rounded-xl bg-elderberry p-3"><p class="text-xs font-bold uppercase text-poppy">Cambio de NFC · todos deben aprobar</p>
-    <p class="text-sm mt-1"><b>${esc(nombre(p.por))}</b> propone que el NFC lo toque <b>${esc(nombre(p.a))}</b> en vez de ${esc(nombre(p.de))}.</p>
-    <p class="text-xs mt-1 text-whitesand/80">Aprobaron ${p.ok.length} de ${total}: ${p.ok.map(i=>esc(nombre(i))).join(', ')}</p>
-    ${yaVote?'<p class="text-xs mt-2 font-bold">Esperando a los demás…</p>'
-      :`<div class="flex gap-2 mt-2"><button onclick="accion({k:'votarPase',ok:true})" class="flex-1 py-2.5 rounded-xl bg-poppy font-bold text-sm">Aprobar</button><button onclick="accion({k:'votarPase',ok:false})" class="flex-1 py-2.5 rounded-xl bg-whitesand/15 font-bold text-sm">Rechazar</button></div>`}
-    ${(miId===p.por||prof)?`<button onclick="accion({k:'cancelarPase'})" class="mt-2 w-full py-2 rounded-xl bg-whitesand/15 text-xs font-bold">Cancelar la solicitud</button>`:''}</div>`; }
+  if (!p) return meToca?`<button onclick="accion({k:'pasarNFC'})" class="mt-2 w-full py-2.5 rounded-xl bg-elderberry text-whitesand text-sm font-bold">No puedo tocarlo · pedir pasarlo a otra persona</button>`:'';
+  const yaVote=p.ok.includes(miId), vot=votantes(), soyVotante=vot.includes(miId);
+  return `<div class="mt-2 rounded-xl bg-elderberry p-3"><p class="text-xs font-bold uppercase text-poppy">Cambio de NFC</p>
+    <p class="text-base mt-1"><b>${esc(nombre(p.por))}</b> propone que lo toque <b>${esc(nombre(p.a))}</b> en vez de ${esc(nombre(p.de))}.</p>
+    <p class="text-xs mt-1 text-whitesand/80">Aprobaron ${p.ok.filter(i=>vot.includes(i)).length} de ${vot.length}</p>
+    ${!soyVotante||yaVote?'<p class="text-sm mt-2 font-bold">Esperando a los demás…</p>'
+      :`<div class="flex gap-2 mt-2"><button onclick="accion({k:'votarPase',ok:true})" class="flex-1 py-3 rounded-xl bg-poppy font-bold">Aprobar</button><button onclick="accion({k:'votarPase',ok:false})" class="flex-1 py-3 rounded-xl bg-whitesand/15 font-bold">Rechazar</button></div>`}
+    ${(miId===p.por||prof)?`<button onclick="accion({k:'cancelarPase'})" class="mt-2 w-full py-2 rounded-xl bg-whitesand/15 text-xs font-bold">Cancelar</button>`:''}</div>`; }
+
 function pCamino(){ const cp=cpAct(), prof=tengo('profeta'), nav=tengo('navegador'), meToca=S.nfcTurno===miId;
+  const nfcBox = meToca
+    ? `<div class="rounded-[22px] p-4 bg-poppy border-4 border-whitesand"><p class="text-2xl font-bold leading-tight">¡Te toca a ti! Acerca tu celular al NFC ${cp.nfc}</p>
+        ${'NDEFReader' in window?(nfcActivo?`<p class="text-sm mt-1 font-bold">✓ NFC activo en este celular</p>`:`<button onclick="leerNFC()" class="mt-2 w-full py-3 rounded-xl bg-elderberry font-bold">((·)) Activar NFC (Android)</button>`):''}
+        <button onclick="accion({k:'nfc',n:${cp.nfc},manual:true})" class="mt-2 w-full py-2.5 rounded-xl bg-elderberry/60 text-sm font-bold">El sticker no respondió · ya lo toqué</button>${panelPase(true,prof)}</div>`
+    : `<div class="rounded-[22px] p-4 bg-wine"><p class="text-sm font-bold uppercase text-whitesand/80">El NFC lo toca</p><p class="text-3xl font-bold">${esc(nombre(S.nfcTurno))}</p>${panelPase(false,prof)}</div>`;
   return `<div class="entra min-h-[100dvh] bg-grass pb-10">
-  <div class="px-4 pt-3 flex justify-between items-center"><span class="px-3 py-1 rounded-full bg-ashwagandha/90 text-whitesand text-xs font-bold">${chipRoles(miId)}</span>
-    <span class="px-3 py-1 rounded-full bg-elderberry/90 text-whitesand text-xs font-bold">${ruta().nombre} · ${S.cp}/${ruta().checkpoints.length}</span></div>
+  <div class="px-4 pt-3 flex justify-between items-center"><span class="px-3 py-1 rounded-full bg-ashwagandha text-whitesand text-sm font-bold">${chipRoles(miId)}</span>
+    <span class="px-3 py-1 rounded-full bg-elderberry text-whitesand text-sm font-bold">Punto ${S.cp+1}/${ruta().checkpoints.length}</span></div>
   ${mapaSVG()}
-  <div class="mx-4 -mt-2 bg-ashwagandha rounded-[26px] p-4 shadow-xl border border-whitesand/25 text-whitesand space-y-3">
-    <div><p class="text-xs font-bold uppercase tracking-wider text-whitesand/75">Próximo punto ${S.cp+1}</p><h2 class="text-lg font-bold">${prof?cp.lugar:'???'}</h2></div>
-    ${prof?`<div class="bg-elderberry rounded-2xl p-3"><p class="text-xs font-bold uppercase text-poppy">Pista (léela al grupo)</p><p class="text-base font-semibold">${cp.pista}</p>${S.ayuda?`<p class="text-xs mt-1 text-whitesand/85">Ayuda: el lugar es "${cp.lugar}".</p>`:''}</div>`
-          :`<p class="text-sm">Pregúntale al Profeta (<b>${esc(nombre(quien('profeta')))}</b>) por la pista.</p>`}
-    ${nav?`<div class="bg-elderberry/60 rounded-2xl p-3"><p class="text-xs font-bold uppercase text-poppy mb-1">Tu brújula: dirección general</p>${widgetBrujula(cp.rumbo,false)}</div>`:''}
-    <div class="rounded-2xl p-3 ${meToca?'bg-poppy':'bg-wine/60'}"><p class="text-sm font-bold">${meToca?'¡Te toca a ti! Al llegar, acerca tu celular al NFC '+cp.nfc+'.':'Al llegar, el NFC lo debe tocar: '+esc(nombre(S.nfcTurno))}</p>
-      ${'NDEFReader' in window?(nfcActivo?`<p class="text-xs mt-1">✓ NFC activo en este celular</p>`:`<button onclick="leerNFC()" class="mt-2 w-full py-3 rounded-xl bg-elderberry text-whitesand font-bold">((·)) Activar NFC (Android)</button>`):''}${meToca?`<button onclick="accion({k:'nfc',n:${cp.nfc}})" class="mt-2 w-full py-2.5 rounded-xl bg-whitesand/15 text-whitesand text-sm font-bold">Simular NFC ${cp.nfc} (prueba)</button>`:''}${panelPase(meToca,prof)}</div>
-    ${prof&&!S.ayuda?`<button onclick="accion({k:'ayuda'})" class="w-full py-2 rounded-xl bg-whitesand/15 text-xs font-bold">Pedir ayuda (cuenta en las estadísticas)</button>`:''}</div></div>`; }
+  <div class="mx-4 -mt-2 space-y-3 text-whitesand">
+    ${prof?vozAlta(cp.pista):`<div class="rounded-[22px] p-4 bg-ashwagandha"><p class="text-2xl font-bold">Sigan al Profeta</p><p class="text-base">${esc(nombre(quien('profeta')))} tiene la pista.</p></div>`}
+    ${nav?`<div class="bg-ashwagandha rounded-[22px] p-4"><p class="text-sm font-extrabold uppercase text-poppy mb-1">Tu brújula · dirección general</p>${widgetBrujula(cp.rumbo,false)}</div>`:''}
+    ${nfcBox}
+    ${prof?`<details class="bg-ashwagandha rounded-[22px] p-4"><summary class="text-lg font-bold cursor-pointer">¿Necesitan ayuda?</summary>
+      ${S.ayuda?`<p class="mt-2 text-lg">El lugar es: <b>${cp.lugar}</b></p>`:`<button onclick="accion({k:'ayuda'})" class="mt-3 w-full py-3 rounded-xl bg-whitesand/15 font-bold">Revelar el lugar</button>`}
+      <button onclick="accion({k:'comodin'})" class="mt-2 w-full py-3 rounded-xl bg-poppy font-bold">Comodín: que otra persona toque el NFC</button>
+      <p class="text-xs mt-1 text-whitesand/80">Úsenlo si a ${esc(nombre(S.nfcTurno))} se le cerró la página o no le funciona el celular.</p></details>`:''}
+  </div></div>`; }
 
-function cabeceraMision(){ const m=S.mision, cp=cpAct(); return `<div class="flex justify-between items-center"><span class="px-3 py-1 rounded-full bg-wine text-whitesand text-xs font-bold">Punto ${S.cp+1} · ${cp.lugar}</span><span class="text-xs font-bold text-whitesand/80">${chipRoles(miId)}</span></div>
-  <div class="mt-3 bg-wine rounded-[28px] p-4 border border-whitesand/25 shadow-xl"><span class="px-2.5 py-0.5 rounded-full bg-poppy text-whitesand text-xs font-bold uppercase">Misión colectiva</span>
-  <h1 class="text-xl font-bold text-whitesand mt-1">${MISIONES[m.tipo].titulo}</h1>${tengo('profeta')?`<p class="text-base text-whitesand mt-2 leading-snug"><b class="text-poppy">Lee en voz alta:</b> ${MISIONES[m.tipo].resumen}</p>`:`<p class="text-xs text-whitesand/80 mt-1">El Profeta les explica la misión.</p>`}</div>`; }
+// --- Misiones ---
 const cajaNivel=t=>caja(t, `<div data-montar="nivel" class="text-center"><div class="relative mx-auto w-40 h-40 rounded-full bg-elderberry border-4 border-whitesand overflow-hidden"><div class="absolute inset-[45%] rounded-full border-2 border-whitesand/50"></div><div id="burbuja" class="absolute left-1/2 top-1/2 -ml-5 -mt-5 w-10 h-10 rounded-full bg-poppy transition-transform"></div></div>
-      <p id="nivel-txt" class="mt-2 font-bold">Inclinado</p><button id="nivel-hold" class="holdable mt-2 w-full py-3 rounded-xl bg-whitesand/15 text-xs font-bold">Sin giroscopio: mantén presionado para "nivelar"</button></div>`);
-const siNo=()=>`<div class="flex gap-2"><button onclick="accion({k:'aprobar',ok:true})" class="flex-1 py-3 rounded-xl bg-poppy font-bold">Sí</button><button onclick="accion({k:'aprobar',ok:false})" class="flex-1 py-3 rounded-xl bg-whitesand/15 font-bold">No</button></div>`;
-const caja=(titulo,html)=>`<div class="mt-3 bg-ashwagandha/95 rounded-[24px] p-4 border border-whitesand/20 text-whitesand"><p class="text-xs font-bold uppercase tracking-wider text-poppy mb-2">${titulo}</p>${html}</div>`;
+      <p id="nivel-txt" class="mt-2 text-lg font-bold">Inclinado ✗</p><button id="nivel-hold" class="holdable mt-2 w-full py-3 rounded-xl bg-whitesand/15 text-sm font-bold">Sin giroscopio: mantén presionado</button></div>`);
+const caja=(titulo,html)=>`<div class="mt-3 bg-ashwagandha rounded-[24px] p-4 text-whitesand"><p class="text-sm font-extrabold uppercase tracking-wider text-poppy mb-2">${titulo}</p>${html}</div>`;
+const cajaRol=(r,txt,w)=>`<div class="mt-3 bg-ashwagandha rounded-[24px] p-4 text-whitesand"><div class="flex items-center gap-3">${avatar(r,'w-12 h-12')}<div><p class="text-xs font-extrabold uppercase tracking-wider text-poppy">Tu tarea · ${ROLES[r].nombre}</p><p class="text-xl font-bold leading-snug">${txt}</p></div></div><div class="mt-3">${w}</div></div>`;
+function widgetTarea(r,T,R){
+  if (T.hecho) return `<p class="text-2xl font-bold">✓ ¡Listo!</p>${T.frag?`<div class="mt-2 rounded-2xl bg-whitesand text-elderberry p-3 text-center"><p class="text-sm font-bold">Tu pedazo (${T.num} de ${T.de}) · díctaselo al Profeta</p><p class="font-brand text-5xl font-bold tracking-widest">${T.frag}</p></div>`:''}`;
+  if (T.t==='agitar') return `<div data-montar="agitarTarea" data-meta="${T.meta}"><div class="h-4 rounded-full bg-elderberry/70 overflow-hidden"><div data-barra class="h-full bg-poppy" style="width:0"></div></div><p data-num class="text-center font-bold mt-1">0 / ${T.meta}</p><button data-tap class="holdable mt-2 w-full py-10 rounded-2xl bg-poppy font-brand text-3xl font-semibold transition">¡Agita o toca!</button></div>`;
+  if (T.t==='nivel') return `<div data-montar="nivelTarea" class="text-center"><div class="relative mx-auto w-36 h-36 rounded-full bg-elderberry border-4 border-whitesand overflow-hidden"><div class="absolute inset-[45%] rounded-full border-2 border-whitesand/50"></div><div data-burbuja class="absolute left-1/2 top-1/2 -ml-5 -mt-5 w-10 h-10 rounded-full bg-poppy transition-transform"></div></div>
+    <div class="h-3 mt-3 rounded-full bg-elderberry/70 overflow-hidden"><div data-barra class="h-full bg-whitesand" style="width:0"></div></div><button data-hold class="holdable mt-2 w-full py-3 rounded-xl bg-whitesand/15 text-sm font-bold">Sin giroscopio: mantén presionado</button></div>`;
+  if (T.t==='rumbo') return widgetBrujula(T.rumbo,true);
+  if (T.t==='grabar') return `<div data-montar="grabadora"><div class="relative h-4 rounded-full bg-elderberry/70 overflow-hidden"><div id="t-vol" class="h-full bg-whitesand transition-all"></div><div class="absolute top-0 bottom-0 w-1 bg-poppy" style="left:${UMBRAL_SONIDO}%"></div></div><p class="text-sm mt-1">Tiene que pasar la línea roja.</p><button id="grabar" class="mt-2 w-full py-7 rounded-2xl bg-poppy font-brand text-3xl font-semibold">● Grabar 3 segundos</button><p id="mic-estado" class="text-base font-bold mt-2"></p></div>`;
+  if (T.t==='foto'){ const q=T.requiere&&R.tareas[T.requiere]; if (q && !q.hecho) return `<p class="text-lg font-bold">Espera… el ${ROLES[T.requiere].nombre} está cargando el flash ⚡</p>`;
+    return `<label class="block w-full py-7 rounded-2xl bg-poppy text-center font-brand text-3xl font-semibold">📷 Tomar foto<input type="file" accept="image/*" capture="environment" class="hidden" onchange="tomarFotoTarea(this)"></label><p id="foto-estado" class="text-base font-bold mt-2">${T.intentos?'Intento '+(T.intentos+1)+' de '+INTENTOS_FOTO:''}</p>`; }
+  return '';
+}
+// Lista del equipo: quién ya cumplió su tarea en esta ronda
+function checklist(){ const m=S.mision; if(!m||!m.rondas||!m.rondas[m.ronda]) return ''; const R=m.rondas[m.ronda];
+  return `<div class="flex flex-wrap gap-2">${Object.entries(R.tareas).map(([r,T])=>`<span class="px-3 py-1.5 rounded-full text-sm font-bold ${T.hecho?'bg-whitesand text-elderberry':'bg-elderberry text-whitesand/80'}">${T.hecho?'✓':'…'} ${ROLES[r].nombre} · ${esc(nombre(quien(r)))}</span>`).join('')}</div>`; }
 
-function pMision(){ const m=S.mision, cp=cpAct(); let h='';
+function pMision(){ const m=S.mision, cp=cpAct(), M=MISIONES[m.tipo], R=m.rondas?m.rondas[m.ronda]:null; let h='';
+  const muestra = m.tipo==='colores'&&R ? `<span class="w-14 h-14 rounded-2xl border-4 border-elderberry shrink-0" style="background:${R.hex}"></span>` : '';
+  if (tengo('profeta')) h+=vozAlta(M.voz.replace('{obj}', R?R.obj:''), muestra);
   if (m.tipo==='equilibrio'){
-    if (tengo('equilibrista')) h+=cajaNivel('Equilibrista: mantén el celular plano');
-    const n=m.orden.indexOf(miId)+1;
-    h+=caja('Tu número', `<div class="text-center"><p class="font-brand text-6xl font-bold">${n}</p><p class="text-xs mt-1">Van en el <b id="t-paso">${m.paso}</b> de ${m.orden.length} · <span id="t-nivel"></span></p>
-      <button onclick="accion({k:'presionar'})" class="mt-3 w-full py-6 rounded-2xl bg-poppy font-brand text-2xl font-semibold active:scale-95">Presionar</button></div>`);
+    if (tengo('equilibrista')) h+=cajaNivel('Tu tarea · Equilibrista: celular plano todo el rato');
+    h+=caja('Tu número', `<div class="text-center"><p class="font-brand text-7xl font-bold">${m.orden.indexOf(miId)+1}</p><p class="text-base mt-1">Van en el <b id="t-paso">${m.paso}</b> de ${m.orden.length} · <span id="t-nivel"></span></p>
+      <button onclick="accion({k:'presionar'})" class="mt-3 w-full py-8 rounded-2xl bg-poppy font-brand text-3xl font-semibold active:scale-95">Presionar</button></div>`);
   }
-  if (m.tipo==='colores'){ const obj=m.objetivos[m.hechos];
-    h+=`<p class="mt-3 text-sm font-bold text-whitesand">Colores: ${m.hechos}/${m.objetivos.length} · <span id="t-nivel"></span></p>`;
-    if (tengo('profeta')) h+=caja('Profeta: díctale el color al Fotógrafo', `<div class="flex items-center gap-3"><span class="w-14 h-14 rounded-2xl border-4 border-whitesand shrink-0" style="background:${obj.hex}"></span><p class="font-brand text-3xl font-bold">${obj.es}</p></div>${m.pendiente?`<div class="mt-3"><p class="text-sm">La página no está segura (vio: ${esc(m.pendiente.vio)}). ¿Es correcta?</p><img src="${m.pendiente.thumb}" class="w-40 mx-auto rounded-xl my-2">${siNo()}</div>`:''}`);
-    if (tengo('fotografo')) h+=caja('Fotógrafo/a', `<p class="text-sm">Fotografía de cerca algo del color que diga el Profeta. Avisa al Equilibrista antes de disparar.</p><label class="mt-2 block w-full py-5 rounded-2xl bg-poppy text-center font-brand text-xl font-semibold">📷 Tomar foto<input type="file" accept="image/*" capture="environment" class="hidden" onchange="tomarFotoColor(this)"></label><p id="foto-estado" class="text-sm mt-2">${m.pendiente?'Esperando que el Profeta revise…':''}</p>`);
-    if (tengo('equilibrista')) h+=cajaNivel('Equilibrista: eres el trípode. Nivela cuando el Fotógrafo vaya a disparar');
-    if (!tengo('profeta')&&!tengo('fotografo')&&!tengo('equilibrista')) h+=caja('Apoya al grupo','<p class="text-sm">Busquen juntos objetos del color que pide el Profeta.</p>');
+  if (m.tipo==='fotos'){
+    h+=`<div class="mt-3"><div class="flex justify-between text-lg font-bold text-whitesand"><span>⏱ Tiempo</span><span id="t-tiempo">${m.tiempo} s</span></div><div class="h-4 rounded-full bg-elderberry/70 overflow-hidden"><div id="t-barra" class="h-full bg-poppy transition-all"></div></div></div>`;
+    if (tengo('agitador')) h+=caja('Tu tarea · Agitador: ¡no pares!', `<div data-montar="agitar"><div class="h-3 rounded-full bg-elderberry/70 overflow-hidden"><div id="t-energia" class="h-full bg-whitesand"></div></div><button id="tap" class="holdable mt-3 w-full py-10 rounded-2xl bg-poppy font-brand text-3xl font-semibold transition">¡Toca y agita!</button><p class="text-sm mt-1">Si paras, el tiempo corre el triple.</p></div>`);
+    if (tengo('equilibrista')) h+=cajaNivel('Tu tarea · Equilibrista: plano = el tiempo va más lento');
   }
-  if (m.tipo==='fotos'){ const obj=m.objetivos[m.hechos];
-    h+=`<div class="mt-3"><div class="flex justify-between text-xs font-bold text-whitesand"><span>Tiempo</span><span id="t-tiempo">${m.tiempo} s</span></div><div class="h-3 rounded-full bg-elderberry/70 overflow-hidden"><div id="t-barra" class="h-full bg-poppy transition-all"></div></div><p class="text-xs font-bold text-whitesand mt-1">Fotos: ${m.hechos}/${m.objetivos.length}</p></div>`;
-    if (tengo('profeta')) h+=caja('Profeta: díctale al Fotógrafo', `<p class="text-sm">Busquen y fotografíen <b class="text-lg">${obj.es}</b>.</p>${m.pendiente?`<div class="mt-2"><p class="text-xs">La IA no lo confirmó (vio: ${esc(m.pendiente.vio)||'nada'}). ¿Es correcta la foto?</p><img src="${m.pendiente.thumb}" class="w-40 mx-auto rounded-xl my-2"><div class="flex gap-2"><button onclick="accion({k:'aprobar',ok:true})" class="flex-1 py-2.5 rounded-xl bg-poppy font-bold text-sm">Sí</button><button onclick="accion({k:'aprobar',ok:false})" class="flex-1 py-2.5 rounded-xl bg-whitesand/15 font-bold text-sm">No</button></div></div>`:''}`);
-    if (tengo('fotografo')) h+=caja('Fotógrafo/a', `<p class="text-sm">El Profeta te dirá qué fotografiar.</p><label class="mt-2 block w-full py-5 rounded-2xl bg-poppy text-center font-brand text-xl font-semibold">📷 Tomar foto<input type="file" accept="image/*" capture="environment" class="hidden" onchange="tomarFoto(this)"></label><p id="foto-estado" class="text-xs mt-2">${m.pendiente?'Esperando que el Profeta revise…':''}</p>`);
-    if (tengo('agitador')) h+=caja('Agitador/a: ¡no pares!', `<div data-montar="agitar"><div class="h-3 rounded-full bg-elderberry/70 overflow-hidden"><div id="t-energia" class="h-full bg-whitesand"></div></div><button id="tap" class="holdable mt-3 w-full py-10 rounded-2xl bg-poppy font-brand text-2xl font-semibold transition">¡Toca y agita!</button><p class="text-xs mt-1 text-whitesand/80">Si paras, el tiempo corre 3 veces más rápido.</p></div>`);
-    if (!tengo('profeta')&&!tengo('fotografo')&&!tengo('agitador')) h+=caja('Apoya al grupo','<p class="text-sm">Ayuda a encontrar el objeto que pide el Profeta.</p>');
-  }
-  if (m.tipo==='sonidos'){ const obj=m.objetivos[m.hechos];
-    h+=`<p class="mt-3 text-sm font-bold text-whitesand">Sonidos: ${m.hechos}/${m.objetivos.length}</p>`;
-    h+=caja('Sonido pedido', `<p class="font-brand text-2xl font-bold">${obj}</p><p class="text-sm mt-1">${tengo('profeta')?'Léelo en voz alta. Cuando el Micrófono grabe, todos hacen el sonido.':'Cuando el Micrófono diga "¡ahora!", háganlo todos juntos.'}</p>`);
-    if (tengo('microfono')) h+=caja('Micrófono', `<div data-montar="grabadora"><p class="text-sm">Cuenta "3, 2, 1" en voz alta y presiona. Grabarás 3 segundos.</p><div class="relative mt-2 h-4 rounded-full bg-elderberry/70 overflow-hidden"><div id="t-vol" class="h-full bg-whitesand transition-all"></div><div class="absolute top-0 bottom-0 w-1 bg-poppy" style="left:${UMBRAL_SONIDO}%"></div></div><p class="text-xs mt-1">El sonido tiene que pasar la línea roja.</p><button id="grabar" class="mt-3 w-full py-6 rounded-2xl bg-poppy font-brand text-2xl font-semibold">● Grabar 3 segundos</button><p id="mic-estado" class="text-sm mt-2">${m.pendiente?'Esperando que el Profeta escuche…':''}</p></div>`);
-    if (tengo('profeta')) h+= m.pendiente ? caja('Profeta: escucha y decide', `${m.pendiente.clip?`<audio controls src="${m.pendiente.clip}" class="w-full"></audio>`:'<p class="text-sm">(grabación simulada, sin audio)</p>'}<p class="text-sm my-2">¿Se escucha ${esc(obj)}?</p>${siNo()}`) : caja('Profeta','<p class="text-sm">Espera la grabación del Micrófono.</p>');
-  }
-  if (m.tipo==='brujula'){
-    if (tengo('navegador')) h+=caja('Navegador: encuentra la dirección secreta', m.revelado?`<p class="text-sm">La palabra es:</p><p class="font-brand text-4xl font-bold text-center my-2">${cp.palabra}</p><p class="text-xs">Díctasela al Profeta.</p>`:`<p class="text-xs mb-2">Gira hasta que la flecha apunte hacia arriba y mantén 3 segundos.</p>${widgetBrujula(cp.rumboSecreto,true)}`);
-    if (tengo('profeta')) h+=caja('Profeta', `<p class="text-sm">${cp.pistaProfeta}</p>${m.revelado&&simulado&&esBot(quien('navegador'))?`<p class="mt-2 text-xs">${esc(nombre(quien('navegador')))} te dice: "<b>${cp.palabra}</b>"</p>`:''}<input id="clave" placeholder="palabra clave" class="mt-3 w-full px-4 py-3 rounded-2xl bg-elderberry/60 border border-whitesand/25 uppercase outline-none"><div class="mt-2">${btn('Comprobar',"accion({k:'clave',w:$('clave').value})")}</div>`);
-    if (!tengo('navegador')&&!tengo('profeta')) h+=caja('Apoya al grupo','<p class="text-sm">Ayuda al Navegador a girar con calma y al Profeta a anotar.</p>');
-  }
-  return `<div class="entra min-h-[100dvh] bg-elderberry px-5 pt-4 pb-12 flex flex-col"><div class="my-auto w-full">${cabeceraMision()}${h}</div></div>`; }
+  if (R) misRoles().forEach(r=>{ const T=R.tareas[r]; if(T) h+=cajaRol(r,T.txt,widgetTarea(r,T,R)); });
+  if (m.tipo==='brujula' && tengo('profeta')) h+=caja('Escribe la palabra completa', `<input id="clave" placeholder="palabra" class="w-full px-4 py-4 rounded-2xl bg-elderberry/60 border border-whitesand/25 uppercase text-2xl font-bold outline-none"><div class="mt-2">${btn('Comprobar',"accion({k:'clave',w:$('clave').value})")}</div>`);
+  if (R) h+=`<div class="mt-4"><p class="text-sm font-bold text-whitesand/85 mb-2">${m.rondas.length>1?'Ronda '+(m.ronda+1)+' de '+m.rondas.length+' · ':''}Equipo</p><div id="t-check">${checklist()}</div></div>`;
+  return `<div class="entra min-h-[100dvh] bg-elderberry px-5 pt-4 pb-12 flex flex-col"><div class="my-auto w-full">
+    <div class="flex justify-between items-center"><span class="px-3 py-1 rounded-full bg-wine text-whitesand text-sm font-bold">Punto ${S.cp+1} · ${cp.lugar}</span></div>
+    <h1 class="text-3xl font-bold text-whitesand mt-2">${M.titulo}</h1>${h}</div></div>`; }
 
 function pCierre(){ return tengo('profeta')
-  ? `<div class="entra min-h-[100dvh] bg-elderberry px-5 pt-10 text-whitesand"><div class="bg-wine rounded-[28px] p-5 border border-whitesand/25"><p class="text-xs font-bold uppercase text-poppy">Lee en voz alta · cierre</p><p class="mt-2 text-lg leading-relaxed">${ruta().cierre}</p></div><div class="mt-5">${btn('Terminar la ruta ✓',"accion({k:'terminar'})")}</div></div>`
-  : `<div class="entra min-h-[100dvh] bg-elderberry px-6 flex flex-col justify-center text-center text-whitesand">${avatar('profeta','w-24 h-24 mx-auto')}<h1 class="text-3xl font-bold mt-4">¡Llegaron!</h1><p class="mt-2 text-sm">Escuchen al Profeta: va a cerrar la historia.</p></div>`; }
+  ? `<div class="entra min-h-[100dvh] bg-elderberry px-5 flex flex-col justify-center">${vozAlta(ruta().cierre)}<div class="mt-5">${btn('Terminar la ruta ✓',"accion({k:'terminar'})")}</div></div>`
+  : `<div class="entra min-h-[100dvh] bg-elderberry px-6 flex flex-col justify-center text-whitesand">${escucha('¡Llegaron!')}</div>`; }
 
-function pFinal(){ const st=S.stats, min=Math.max(1,Math.round((st.fin-st.inicio)/60000)), d=new Date(st.fin), fila=(a,b)=>`<div class="flex justify-between text-xs py-1 border-b border-whitesand/10"><span class="text-whitesand/85">${a}</span><b>${b}</b></div>`;
+// --- Insignias ---
+const nivelIns = r => { const f=((S.stats.rol||{})[r]||{}).fallos||0; return f===0?'Oro':f<=2?'Plata':'Bronce'; };
+const chipIns = (r,niv,cls='') => `<div class="flex items-center gap-3 rounded-2xl bg-elderberry/70 p-3 ${cls}"><div class="w-14 h-14 rounded-full bg-whitesand flex items-center justify-center text-3xl shrink-0 border-4 ${niv==='Oro'?'border-[#E8C547]':niv==='Plata'?'border-[#C9C9C9]':'border-[#B87333]'}">${IMG_OK['insignia-'+r]?png('insignia-'+r,'w-full h-full object-contain rounded-full'):INSIGNIAS[r].icono}</div><div class="text-left"><p class="font-brand text-xl font-bold leading-tight">${INSIGNIAS[r].nombre}</p><p class="text-sm">${ROLES[r].nombre} · nivel ${niv}</p></div></div>`;
+function guardarInsignias(){ if(!S||S.fase!=='final') return; const clv='ins_'+S.codigo+'_'+S.stats.fin; if(store.get(clv)) return; store.set(clv,1);
+  const lista=store.get('insignias')||[]; misRoles().forEach(r=>lista.push({ rol:r, nivel:nivelIns(r), ruta:ruta().nombre, fecha:Date.now() })); store.set('insignias',lista); }
+
+function pFinal(){ guardarInsignias(); const st=S.stats, min=Math.max(1,Math.round((st.fin-st.inicio)/60000)), d=new Date(st.fin), fila=(a,b)=>`<div class="flex justify-between text-base py-1.5 border-b border-whitesand/10"><span class="text-whitesand/85">${a}</span><b>${b}</b></div>`;
   return `<div class="entra min-h-[100dvh] bg-elderberry px-5 pt-6 pb-12 text-whitesand">
-  <div class="bg-wine rounded-[32px] p-5 text-center border-2 border-whitesand/30"><div class="flota w-16 h-16 mx-auto rounded-full bg-poppy flex items-center justify-center text-3xl">✦</div>
-    <h1 class="text-3xl font-bold mt-2">¡Ruta completada!</h1><p class="text-xs mt-1">${ruta().nombre} · ${S.jugadores.length} personas</p>
-    <div class="mt-4 bg-elderberry/70 rounded-2xl p-3 text-left">${fila('Tiempo total',min+' min')}${fila('Errores',st.errores)}${fila('Ayudas pedidas',st.ayudas)}${fila('Día',d.toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'}))}${fila('Hora',d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}))}${fila('Clima',st.clima||'—')}</div>
-    <div class="mt-3 bg-elderberry/70 rounded-2xl p-3 text-left"><p class="text-xs font-bold uppercase text-poppy mb-1">Equipo y roles</p>${S.jugadores.map(j=>fila(esc(j.nombre),chipRoles(j.id))).join('')}</div>
-    <div class="mt-3 bg-elderberry/70 rounded-2xl p-3 text-left"><p class="text-xs font-bold uppercase text-poppy mb-1">Misiones</p>${st.misiones.map(x=>fila(MISIONES[x.tipo].titulo, Math.round(x.seg/60*10)/10+' min · '+x.errores+' err.')).join('')}</div>
-    <div class="mt-4 bg-whitesand text-elderberry rounded-2xl p-4">${IMG_OK['sello-postal']?png('sello-postal','mx-auto max-h-24'):'<p class="text-2xl">🎨</p>'}<p class="font-bold">Su postal dibujada a mano los espera</p><p class="text-xs">Muestren esta pantalla para recibirla.</p></div>
-    ${soyAnfitrion?`<div class="mt-4">${btn('▶ Ver la pieza audiovisual del grupo','verPieza()')}</div><p class="text-xs mt-1 text-whitesand/75">${MEDIA.length} recuerdos capturados</p>`:`<p class="mt-4 text-xs">La pieza audiovisual se reproduce en el celular del Profeta.</p>`}
-    <button onclick="salirSala()" class="mt-4 w-full py-2.5 rounded-2xl bg-ashwagandha/80 text-xs font-bold">Volver al inicio</button></div></div>`; }
+  <h1 class="text-4xl font-bold text-center">¡Ruta completada!</h1><p class="text-center text-lg">${ruta().nombre} · ${S.jugadores.length} personas · ${min} min</p>
+  <div class="mt-5 rounded-[32px] bg-gradient-to-br from-poppy to-wine p-6 text-center shadow-2xl border-4 border-whitesand">
+    <p class="text-sm font-extrabold uppercase tracking-widest">Su recuerdo</p><h2 class="text-3xl font-bold mt-1">Pieza audiovisual</h2>
+    ${soyAnfitrion?`<button onclick="verPieza()" class="flota mt-4 w-full py-8 rounded-[26px] bg-whitesand text-elderberry font-brand text-3xl font-bold shadow-xl">▶ Ver nuestra pieza</button><p class="mt-2 text-base">${MEDIA.length} fotos y audios del recorrido</p>`
+      :`<p class="mt-3 text-xl font-bold">Júntense alrededor del celular de ${esc(nombre(quien('profeta')))}: ahí se reproduce.</p>`}</div>
+  <h2 class="text-2xl font-bold mt-6">${misRoles().length>1?'Tus insignias':'Tu insignia'}</h2>${misRoles().map(r=>chipIns(r,nivelIns(r),'mt-2')).join('')}
+  <p class="text-sm mt-1 text-whitesand/80">Quedó guardada en tu perfil.</p>
+  <h2 class="text-xl font-bold mt-6">Equipo</h2><div class="mt-1">${S.jugadores.map(j=>fila(esc(j.nombre), misRoles(j.id).map(r=>INSIGNIAS[r].icono+' '+ROLES[r].nombre).join(' · '))).join('')}</div>
+  <h2 class="text-xl font-bold mt-6">Estadísticas</h2><div class="mt-1">${fila('Errores',st.errores)}${fila('Ayudas y comodines',st.ayudas)}${fila('Día',d.toLocaleDateString('es-CL',{weekday:'long',day:'numeric',month:'long'}))}${fila('Hora',d.toLocaleTimeString('es-CL',{hour:'2-digit',minute:'2-digit'}))}${fila('Clima',st.clima||'—')}
+    ${st.misiones.map(x=>fila(MISIONES[x.tipo].titulo, Math.round(x.seg/60*10)/10+' min · '+x.errores+' err.')).join('')}</div>
+  <button onclick="salirSala()" class="mt-6 w-full py-3 rounded-2xl bg-ashwagandha text-base font-bold">Volver al inicio</button></div>`; }
 
+// Pantalla cuando se abre un NFC en un navegador sin sesión del juego
+function pNfcSin(){ return `<div class="entra min-h-[100dvh] bg-grass px-6 flex flex-col justify-center text-whitesand text-center">
+  <h1 class="text-3xl font-bold">¿Estás jugando Tupahue?</h1>
+  <p class="mt-3 text-lg">Este NFC se abrió en un navegador donde no está tu partida. <b>Vuelve a la pestaña o app donde estás jugando</b> y presiona <b>"El sticker no respondió · ya lo toqué"</b>.</p>
+  <div class="mt-6">${btn('Soy nuevo · quiero jugar',"vista='bienvenida';render()",'bg-elderberry')}</div></div>`; }
+function misInsignias(){ const l=store.get('insignias')||[]; if(!l.length) return ''; const c={}; l.forEach(x=>c[x.rol]=(c[x.rol]||0)+1);
+  return `<div class="mt-5 px-5"><h2 class="font-bold uppercase tracking-wider text-whitesand mb-2">Mis insignias (${l.length})</h2><div class="flex flex-wrap gap-2">${Object.entries(c).map(([r,n])=>`<span class="px-3 py-2 rounded-2xl bg-ashwagandha text-whitesand font-bold">${INSIGNIAS[r].icono} ${INSIGNIAS[r].nombre} ×${n}</span>`).join('')}</div></div>`; }
 /* Pieza audiovisual: presentación con los dibujos, fotos y audios del recorrido */
 function verPieza(){ const imgs=MEDIA.filter(x=>x.tipo==='img'), auds=MEDIA.filter(x=>x.tipo==='audio');
   const ov=document.createElement('div'); ov.className='fixed inset-0 z-50 bg-elderberry flex flex-col items-center justify-center text-whitesand p-6 text-center'; document.body.appendChild(ov);
@@ -691,23 +742,30 @@ function registrar(){ const n=$('r-n').value.trim(), c=$('r-c').value.trim();
 function salirPerfil(){ perfil=null; store.set('perfil',null); vista='registro'; render(); }
 const codigoAzar=()=>Array.from({length:4},()=>'ABCDEFGHJKLMNPQRSTUVWXYZ'[Math.floor(Math.random()*24)]).join('');
 function crearSala(sim){ const cod=codigoAzar(); soyAnfitrion=true; sala=cod;
-  const iniciar=()=>{ S=nuevaSala(cod); store.set('sala',{cod,host:true}); prev=JSON.parse(JSON.stringify(S)); render(); };
+  const iniciar=()=>{ S=nuevaSala(cod); store.set('sala',{cod,host:true,t:Date.now()}); prev=JSON.parse(JSON.stringify(S)); render(); };
   if (sim){ simulado=true; red('modo simulado'); iniciar(); procesar(miId,{k:'bot+'}); procesar(miId,{k:'bot+'}); return; }
   conectar(cod, ok=>{ if(ok) iniciar(); else { soyAnfitrion=false; sala=null; toast('No se pudo conectar. Prueba el modo con jugadores simulados.','error'); } }); }
 function volverSala(){ const g=store.get('sala'), h=store.get('host');
   if (g && g.host && h){ soyAnfitrion=true; sala=g.cod; conectar(g.cod, ok=>{ if(!ok) return toast('No se pudo conectar.','error'); S=h.S; prev=JSON.parse(JSON.stringify(S)); render(true); publicar(); }); }
   else if (g) unirse(g.cod); }
 function salaGuardada(){ const g=store.get('sala'), h=store.get('host'); if(!g) return null;
-  if (g.host && !(h && Date.now()-h.t < 3*3600e3)) return null; return g; }
+  if (g.host && !(h && Date.now()-h.t < 3*3600e3)) return null; if (!g.host && !(g.t && Date.now()-g.t < 3*3600e3)) return null; return g; }
 function unirse(cod){ cod=(cod||$('u-c').value).trim().toUpperCase(); if(cod.length!==4) return toast('El código tiene 4 letras.','error');
-  soyAnfitrion=false; sala=cod; conectar(cod, ok=>{ if(!ok) return toast('No se pudo conectar a la sala.','error'); store.set('sala',{cod,host:false}); enviar({t:'unirse',id:miId,nombre:perfil.nombre}); red('esperando al Profeta…'); toast('Conectado. Entrando a la sala '+cod+'…'); }); }
+  soyAnfitrion=false; sala=cod; conectar(cod, ok=>{ if(!ok) return toast('No se pudo conectar a la sala.','error'); store.set('sala',{cod,host:false,t:Date.now()}); enviar({t:'unirse',id:miId,nombre:perfil.nombre}); red('esperando al Profeta…'); toast('Conectado. Entrando a la sala '+cod+'…'); }); }
 function salirSala(){ store.set('sala',null); store.set('host',null); location.href=location.pathname; }
 
 // Si la página se abrió desde un sticker NFC (?nfc=N): volver a la sala y registrar el toque
-if (nfcURL){ const g=store.get('sala');
-  if (perfil && g && !g.host){ vista='inicio'; unirse(g.cod); toast('Leyendo NFC '+nfcURL+'…');
-    const iv=setInterval(()=>{ if(S && S.fase==='camino'){ accion({k:'nfc',n:nfcURL}); clearInterval(iv); history.replaceState(null,'',location.pathname); } },1200); setTimeout(()=>clearInterval(iv),30000); }
-  else setTimeout(()=>toast('¡Encontraste un punto de Tupahue! Crea una sala con tu grupo para jugar.'),700); }
+// Al abrir la página desde un sticker NFC (?nfc=N)
+if (nfcURL) try{ history.replaceState(null,'',location.pathname); }catch(e){}   // se limpia la dirección: así el aviso no vuelve a salir al recargar
+const gIni = salaGuardada();
+if (nfcURL){
+  if (perfil && gIni && !gIni.host){ vista='inicio'; unirse(gIni.cod); toast('Leyendo NFC '+nfcURL+'…');
+    const iv=setInterval(()=>{ if(S && S.fase==='camino'){ accion({k:'nfc',n:nfcURL}); clearInterval(iv); } },1200); setTimeout(()=>clearInterval(iv),60000); }
+  else if (perfil && gIni && gIni.host){ vista='inicio'; volverSala(); }
+  else vista='nfcsin';
+}
+// Si la página se recargó o se cerró a mitad del juego, vuelve sola a la sala
+else if (perfil && gIni){ vista='inicio'; volverSala(); toast('Volviendo a tu sala '+gIni.cod+'…'); }
 // Si el NFC abrió una pestaña nueva (iPhone), la pestaña antigua queda en pausa para no tener varias jugando
 let pausada=false;
 try{ const bc=new BroadcastChannel('tupahue');
