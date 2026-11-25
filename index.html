@@ -115,12 +115,83 @@ const AVATAR = {
   equilibrista:`<svg viewBox="0 0 64 64" class="w-full h-full"><rect x="5" y="16" width="54" height="18" rx="9" fill="#E5C1A1" stroke="#5B1B3A" stroke-width="2.5"/><line x1="25" y1="19" x2="25" y2="31" stroke="#5B1B3A" stroke-width="2"/><line x1="39" y1="19" x2="39" y2="31" stroke="#5B1B3A" stroke-width="2"/><circle cx="32" cy="25" r="5" fill="#D6533F" stroke="#5B1B3A" stroke-width="1.5"/><polygon points="32,38 22,57 42,57" fill="#5C4E16" stroke="#5B1B3A" stroke-width="2.5" stroke-linejoin="round"/></svg>`,
 };
 const MONTANAS = `<svg viewBox="0 0 375 330" preserveAspectRatio="none" class="w-full h-full block">
-  <path d="M0 175 L55 115 L110 155 L185 88 L255 148 L320 105 L375 150 L375 330 L0 330Z" fill="#863B56" opacity=".45"/>
-  <path d="M0 190 L85 130 L165 180 L240 112 L315 168 L375 135 L375 330 L0 330Z" fill="#5B1B3A" opacity=".55"/>
-  <path d="M185 88 L162 115 L178 112 L185 122 L195 110 L208 116Z" fill="#E5C1A1" opacity=".85"/>
-  <path d="M0 125 Q95 190 165 275 L0 295Z" fill="#84752F"/><path d="M375 170 Q275 215 195 280 L375 300Z" fill="#87332B" opacity=".85"/>
-  <path d="M0 250 Q185 215 375 260 L375 330 L0 330Z" fill="#84752F"/><path d="M0 280 Q190 255 375 290 L375 330 L0 330Z" fill="#5C4E16"/>
-  <g fill="#5C4E16"><circle cx="52" cy="265" r="14"/><circle cx="70" cy="272" r="11"/><circle cx="322" cy="274" r="15"/></g></svg>`;
+  <!-- Relieve interno y luz del cerro (Wine #863B56) -->
+  <path d="M0 165 L48 118 L66 135 L105 162 L145 148 L188 188 L225 182 L272 225 L312 215 L375 248 L375 330 L0 330Z" fill="#863B56"/>
+  
+  <!-- Silueta principal y sombras del cerro (Elderberry #5B1B3A) -->
+  <path d="M0 172 L45 124 L54 126 L68 148 L100 172 L138 158 L168 196 L210 190 L255 234 L298 224 L375 258 L375 330 L0 330Z" fill="#5B1B3A"/>
+  <path d="M48 118 L54 126 L44 175 L25 220 L0 215 L0 165Z" fill="#5B1B3A"/>
+  <path d="M145 148 L168 196 L142 235 L115 200Z" fill="#5B1B3A"/>
+  <path d="M225 182 L255 234 L230 265 L205 220Z" fill="#5B1B3A"/>
+  <path d="M312 215 L335 255 L375 265 L375 248Z" fill="#5B1B3A"/>
+
+  <!-- Estatua de la Virgen en la cumbre (Elderberry #5B1B3A) -->
+  <g fill="#5B1B3A">
+    <!-- Pedestal / Santuario -->
+    <rect x="44" y="110" width="10" height="11" rx="1"/>
+    <path d="M42 110 H56 L54 107 H44Z"/>
+    <!-- Figura y brazos abiertos -->
+    <path d="M46 107 L47 96 H51 L52 107Z"/>
+    <circle cx="49" cy="93.5" r="2.2"/>
+    <path d="M47 98 L41 94 L42 92.5 L47 96.5 M51 98 L57 94 L56 92.5 L51 96.5"/>
+  </g>
+
+  <!-- Cable del teleférico -->
+  <line x1="54" y1="115" x2="375" y2="218" stroke="#5B1B3A" stroke-width="1.3"/>
+
+  <!-- Cabina 1 (Poppy #D6533F) -->
+  <g transform="translate(110, 133)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#5B1B3A" stroke-width="1.3"/>
+    <line x1="-2.5" y1="0" x2="2.5" y2="0" stroke="#5B1B3A" stroke-width="1.5"/>
+    <rect x="-6" y="6" width="12" height="9" rx="2.5" fill="#D6533F"/>
+    <rect x="-4.5" y="7.5" width="3.8" height="3.2" rx="0.6" fill="#E5C1A1" opacity="0.8"/>
+    <rect x="0.7" y="7.5" width="3.8" height="3.2" rx="0.6" fill="#E5C1A1" opacity="0.8"/>
+  </g>
+
+  <!-- Cabina 2 (Azul teleférico) -->
+  <g transform="translate(157, 148)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#5B1B3A" stroke-width="1.3"/>
+    <line x1="-2.5" y1="0" x2="2.5" y2="0" stroke="#5B1B3A" stroke-width="1.5"/>
+    <rect x="-6" y="6" width="12" height="9" rx="2.5" fill="#2A7B9B"/>
+    <rect x="-4.5" y="7.5" width="3.8" height="3.2" rx="0.6" fill="#E5C1A1" opacity="0.8"/>
+    <rect x="0.7" y="7.5" width="3.8" height="3.2" rx="0.6" fill="#E5C1A1" opacity="0.8"/>
+  </g>
+
+  <!-- Cabina 3 (Poppy #D6533F) -->
+  <g transform="translate(280, 187.5)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#5B1B3A" stroke-width="1.3"/>
+    <line x1="-2.5" y1="0" x2="2.5" y2="0" stroke="#5B1B3A" stroke-width="1.5"/>
+    <rect x="-6" y="6" width="12" height="9" rx="2.5" fill="#D6533F"/>
+    <rect x="-4.5" y="7.5" width="3.8" height="3.2" rx="0.6" fill="#E5C1A1" opacity="0.8"/>
+    <rect x="0.7" y="7.5" width="3.8" height="3.2" rx="0.6" fill="#E5C1A1" opacity="0.8"/>
+  </g>
+
+  <!-- Cabina 4 (Azul teleférico) -->
+  <g transform="translate(346, 208.5)">
+    <line x1="0" y1="0" x2="0" y2="6" stroke="#5B1B3A" stroke-width="1.3"/>
+    <line x1="-2.5" y1="0" x2="2.5" y2="0" stroke="#5B1B3A" stroke-width="1.5"/>
+    <rect x="-6" y="6" width="12" height="9" rx="2.5" fill="#2A7B9B"/>
+    <rect x="-4.5" y="7.5" width="3.8" height="3.2" rx="0.6" fill="#E5C1A1" opacity="0.8"/>
+    <rect x="0.7" y="7.5" width="3.8" height="3.2" rx="0.6" fill="#E5C1A1" opacity="0.8"/>
+  </g>
+
+  <!-- Laderas verdes de primer plano (Grass #84752F y Ashwagandha #5C4E16) -->
+  <path d="M0 245 Q135 280 265 245 Q325 230 375 245 L375 330 L0 330Z" fill="#5C4E16"/>
+  <path d="M0 198 Q85 235 165 285 L375 268 L375 330 L0 330Z" fill="#84752F"/>
+  
+  <!-- Arbustos y follaje orgánico (Ashwagandha #5C4E16) -->
+  <path d="M0 278 Q120 262 245 288 Q315 270 375 285 L375 330 L0 330Z" fill="#5C4E16"/>
+  <g fill="#5C4E16">
+    <circle cx="15" cy="232" r="14"/>
+    <circle cx="32" cy="240" r="11"/>
+    <circle cx="62" cy="256" r="13"/>
+    <circle cx="80" cy="264" r="10"/>
+    <circle cx="285" cy="264" r="16"/>
+    <circle cx="310" cy="260" r="18"/>
+    <circle cx="335" cy="272" r="15"/>
+    <circle cx="360" cy="268" r="14"/>
+  </g>
+</svg>`;
 const PICO = `<svg viewBox="0 0 375 150" preserveAspectRatio="none" class="absolute inset-0 w-full h-full pointer-events-none">
   <polygon points="25,145 95,55 165,145" fill="#863B56"/><polygon points="215,145 290,52 360,145" fill="#863B56"/>
   <polygon points="85,145 188,8 290,145" fill="#5B1B3A"/><polygon points="188,8 153,55 172,50 188,64 205,48 222,55" fill="#E5C1A1"/></svg>`;
@@ -530,8 +601,15 @@ function pBienvenida(){ return `<div class="entra min-h-[100dvh] flex flex-col b
   <div class="text-center px-6 pt-16"><span class="px-3 py-1 rounded-full bg-ashwagandha/10 text-xs font-bold uppercase tracking-widest">Exploración urbana</span>
     ${IMG_OK.logo?png('logo','mx-auto mt-2 max-h-28'):'<h1 class="text-[58px] leading-none font-bold mt-2">Tupahue</h1>'}<p class="mt-2 text-sm font-bold text-terracotta">Descubre tu ciudad jugando en equipo</p>
     <button onclick="vista=perfil?'inicio':'registro';render()" class="mt-9 w-full max-w-[260px] py-4 rounded-full bg-poppy text-whitesand font-brand text-lg font-semibold shadow-lg active:scale-95">Inicia la aventura →</button></div>
-  <div class="relative mt-auto h-[330px]"><div class="flota absolute right-12 top-14 w-11 h-11 rounded-full bg-poppy/85"></div>
-    <div class="absolute inset-x-0 top-24 text-center z-10"><span class="font-brand text-xl font-bold bg-whitesand/80 px-4 py-1 rounded-full border border-ashwagandha/20">¡Hola!</span></div>${IMG_OK['fondo-inicio']?png('fondo-inicio','absolute inset-0 w-full h-full object-cover'):MONTANAS}</div></div>`; }
+  <div class="relative mt-auto h-[330px]">
+    <div class="absolute inset-x-0 top-[185px] flex justify-center z-10 pointer-events-none">
+      <div class="relative bg-whitesand text-ashwagandha font-brand text-xl font-bold px-5 py-1.5 rounded-full shadow-sm">
+        ¡Hola!
+        <div class="w-3 h-3 bg-whitesand rotate-45 mx-auto -mb-3 mt-0.5"></div>
+      </div>
+    </div>
+    ${IMG_OK['fondo-inicio']?png('fondo-inicio','absolute inset-0 w-full h-full object-cover'):MONTANAS}
+  </div></div>`; }
 
 function pRegistro(){ return `<div class="entra min-h-[100dvh] bg-grass px-6 pt-6 pb-10 flex flex-col">
   <div class="flex justify-between items-center">${atras("vista='bienvenida';render()")}<span class="text-xs font-bold uppercase tracking-widest text-whitesand/80">Solo la primera vez</span></div>
